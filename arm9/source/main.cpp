@@ -21,6 +21,7 @@
 #include "Arm9IoRegisterClearer.h"
 #include "Arm9Patcher.h"
 #include "Arm7Patcher.h"
+#include "patches/arm9/guide/GuideOverlay9.h"
 #include "patches/platform/LoaderPlatform.h"
 #include "patches/platform/LoaderPlatformFactory.h"
 #include "arm9Clock.h"
@@ -163,8 +164,15 @@ static void handleApplyArm7PatchesCommand(u32 cheatsLength, u32 guideInfoLength)
 {
     void* cheats = nullptr;
     void* guideInfo = nullptr;
+    void* guideOverlay9 = nullptr;
     void* patchSpaceStart = Arm7Patcher().ApplyPatches(sLoaderPlatform, cheatsLength, cheats,
-        guideInfoLength, guideInfo, sRunInDSiMode);
+        guideInfoLength, guideInfo, guideOverlay9, sRunInDSiMode);
+    if (guideOverlay9 != nullptr)
+    {
+        // The arm9 vblank hook site was located during the arm9 patch pass;
+        // the resident memory for the stub only exists now.
+        GuideOverlay9Install(guideOverlay9);
+    }
     if (sSoftResetCheatsPointer != nullptr)
     {
         *sSoftResetCheatsPointer = cheats;

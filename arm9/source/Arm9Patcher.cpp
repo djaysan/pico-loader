@@ -26,6 +26,7 @@
 #include "patches/arm9/OverlayPatches/KirbySuperStarUltra/KirbySuperStarUltraPatch.h"
 #include "patches/arm9/OverlayPatches/RabbidsGoHome/RabbidsGoHomePatch.h"
 #include "patches/arm9/OverlayPatches/GoldenSunDarkDawn/GoldenSunDarkDawnOverlayHookPatch.h"
+#include "patches/arm9/guide/GuideOverlay9.h"
 #include "SecureSysCallsUnusedSpaceLocator.h"
 #include "fastSearch.h"
 #include "gameCode.h"
@@ -168,6 +169,11 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     OSResetSystemPatch* osResetSystemPatch = nullptr;
     if (sdkVersion != 0)
     {
+        // Locate the arm9 vblank hook site for the guide overlay; the hook
+        // itself is installed later, once the arm7 patch pass has reserved
+        // resident memory for the stub. A miss just disables the overlay.
+        GuideOverlay9FindHookSite(patchContext);
+
         if (*(vu32*)0x02FFF00C == GAMECODE("ADAJ") &&
             romHeader->arm9LoadAddress == 0x02004000 &&
             romHeader->arm9EntryAddress == 0x02004800)

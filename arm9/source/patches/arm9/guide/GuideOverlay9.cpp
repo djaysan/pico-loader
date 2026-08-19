@@ -22,6 +22,7 @@ enum class Variant { None, Sdk2, Sdk5, Sdk4Thumb };
 
 static u32* sHookSite = nullptr;
 static Variant sVariant = Variant::None;
+static void* sStubTarget = nullptr;
 
 void GuideOverlay9FindHookSite(PatchContext& patchContext)
 {
@@ -48,16 +49,34 @@ void GuideOverlay9FindHookSite(PatchContext& patchContext)
     }
 }
 
-void GuideOverlay9Install(void* target, void* runTarget)
+void GuideOverlay9ReserveStub(PatchContext& patchContext)
 {
-    if (!sHookSite || sVariant == Variant::None)
+    if (!sHookSite)
+        return;
+    // +4 so the stub can be aligned; the heap gives no alignment guarantee.
+    void* space = patchContext.GetPatchHeap().Alloc(SECTION_SIZE(patch_guideoverlay9) + 4);
+    if (space)
+    {
+        sStubTarget = (void*)(((u32)space + 3) & ~3u);
+        LOG_DEBUG("Guide overlay stub space at 0x%p\n", sStubTarget);
+    }
+    else
+    {
+        LOG_DEBUG("No patch heap space for the guide overlay stub\n");
+    }
+}
+
+void GuideOverlay9Install()
+{
+    if (!sHookSite || sVariant == Variant::None || !sStubTarget)
         return;
 
     // Bake the variant's literal slots into the loader's copy of the stub,
     // then place it. The displaced prologue instructions with pc-relative
     // loads are replayed from these slots (see GuideOverlay9PatchCode.s).
+    void* target = sStubTarget;
     u32 site = (u32)sHookSite;
-    u32 runDelta = (u32)runTarget - (u32)SECTION_START(patch_guideoverlay9);
+    u32 runDelta = (u32)target - (u32)SECTION_START(patch_guideoverlay9);
     const void* entry;
     switch (sVariant)
     {
@@ -97,5 +116,5 @@ void GuideOverlay9Install(void* target, void* runTarget)
     dc_flushAll();
     dc_drainWriteBuffer();
     ic_invalidateAll();
-    LOG_DEBUG("Guide overlay placed at 0x%p (runs at 0x%p)\n", target, runTarget);
+    LOG_DEBUG("Guide overlay placed at 0x%p\n", target);
 }

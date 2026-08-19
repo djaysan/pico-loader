@@ -164,15 +164,13 @@ static void handleApplyArm7PatchesCommand(u32 cheatsLength, u32 guideInfoLength)
 {
     void* cheats = nullptr;
     void* guideInfo = nullptr;
-    void* guideOverlay9 = nullptr;
-    void* guideOverlay9Run = nullptr;
     void* patchSpaceStart = Arm7Patcher().ApplyPatches(sLoaderPlatform, cheatsLength, cheats,
-        guideInfoLength, guideInfo, guideOverlay9, guideOverlay9Run, sRunInDSiMode);
-    if (guideOverlay9 != nullptr)
+        guideInfoLength, guideInfo, sRunInDSiMode);
+    if (guideInfo != nullptr)
     {
-        // The arm9 vblank wait site was located during the arm9 patch pass;
-        // the resident memory for the stub only exists now.
-        GuideOverlay9Install(guideOverlay9, guideOverlay9Run);
+        // Site and stub space were reserved during the arm9 patch pass;
+        // only hook when this launch actually has a guide.
+        GuideOverlay9Install();
     }
     if (sSoftResetCheatsPointer != nullptr)
     {

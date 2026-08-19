@@ -241,6 +241,9 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     {
         ErrorDisplay().PrintError("Failed to apply arm9 patches.");
     }
+    // After all regular patches took their space: leftover patch heap
+    // space for the guide overlay stub, if any (graceful skip otherwise).
+    GuideOverlay9ReserveStub(patchContext);
     dc_flushAll();
     dc_drainWriteBuffer();
     ic_invalidateAll();

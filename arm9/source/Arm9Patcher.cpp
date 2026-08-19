@@ -169,10 +169,10 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     OSResetSystemPatch* osResetSystemPatch = nullptr;
     if (sdkVersion != 0)
     {
-        // Locate the arm9 vblank hook site for the guide overlay; the hook
-        // itself is installed later, once the arm7 patch pass has reserved
-        // resident memory for the stub. A miss just disables the overlay.
-        GuideOverlay9FindHookSite(patchContext);
+        // NOTE: the arm9 guide overlay hook is disabled. The arm9 per-frame
+        // handler (OS irq dispatcher) is built at runtime inside ITCM and is
+        // not present in the rom image, so it cannot be hooked by image
+        // patching the way the arm7 monitor is. See PHASE3-FINDINGS.md.
 
         if (*(vu32*)0x02FFF00C == GAMECODE("ADAJ") &&
             romHeader->arm9LoadAddress == 0x02004000 &&
@@ -241,9 +241,6 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     {
         ErrorDisplay().PrintError("Failed to apply arm9 patches.");
     }
-    // After all regular patches took their space: leftover patch heap
-    // space for the guide overlay stub, if any (graceful skip otherwise).
-    GuideOverlay9ReserveStub(patchContext);
     dc_flushAll();
     dc_drainWriteBuffer();
     ic_invalidateAll();

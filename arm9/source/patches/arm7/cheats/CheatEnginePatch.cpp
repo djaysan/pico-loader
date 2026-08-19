@@ -1,6 +1,8 @@
 #include "common.h"
+#include <string.h>
 #include "thumbInstructions.h"
 #include "CheatEnginePatchCode.h"
+#include "patches/arm7/guide/GuideMonitorPatchCode.h"
 #include "CheatEnginePatch.h"
 
 static const u32 sOSiIrqVBlankPattern0[] = { 0xE92D4008u, 0xE59F2038u, 0xE59F0038u, 0xE5921000u };
@@ -37,19 +39,42 @@ bool CheatEnginePatch::FindPatchTarget(PatchContext& patchContext)
         LOG_DEBUG("ARM7 OSi_IrqVBlank found at 0x%p\n", _vblankIrqHandler);
     }
 
-    return _vblankIrqHandler != nullptr;
+    // A miss is only fatal when cheats are active; the guide monitor
+    // degrades gracefully on games with an unknown OSi_IrqVBlank signature.
+    return _vblankIrqHandler != nullptr || _cheats == nullptr;
 }
 
 void CheatEnginePatch::ApplyPatch(PatchContext& patchContext)
 {
-    if (!_vblankIrqHandler || !_cheats)
+    if (!_vblankIrqHandler || (!_cheats && !_guideMonitorTarget))
         return;
 
-    auto cheatEnginePatchCode = patchContext.GetPatchCodeCollection().AddUniquePatchCode<CheatEnginePatchCode>
-    (
-        patchContext.GetPatchHeap(),
-        _cheats
-    );
+    const void* hookTarget = nullptr;
+    const void* hookTargetArm = nullptr;
+
+    if (_cheats)
+    {
+        auto cheatEnginePatchCode = patchContext.GetPatchCodeCollection().AddUniquePatchCode<CheatEnginePatchCode>
+        (
+            patchContext.GetPatchHeap(),
+            _cheats
+        );
+        hookTarget = cheatEnginePatchCode->GetCheatEngineFunction();
+        hookTargetArm = cheatEnginePatchCode->GetCheatEngineFunctionArm();
+    }
+
+    if (_guideMonitorTarget)
+    {
+        // The guide monitor is copied to reserved main memory (not the wram
+        // patch heap) and chains to the cheat engine when cheats are active.
+        guidemonitor_guideInfoPtr = _guideInfo;
+        guidemonitor_chainPtr = hookTarget;
+        memcpy(_guideMonitorTarget, SECTION_START(patch_guidemonitor), SECTION_SIZE(patch_guidemonitor));
+        u32 targetDelta = (u32)_guideMonitorTarget - (u32)SECTION_START(patch_guidemonitor);
+        hookTarget = (const void*)((u32)guidemonitor_entry + targetDelta);
+        hookTargetArm = (const void*)((u32)guidemonitor_entry_arm + targetDelta);
+        LOG_DEBUG("Guide monitor placed at 0x%p\n", _guideMonitorTarget);
+    }
 
     int patchOffset;
     if (_foundPattern == sOSiIrqVBlankPattern0)
@@ -74,12 +99,12 @@ void CheatEnginePatch::ApplyPatch(PatchContext& patchContext)
     {
         *(u16*)((u8*)_vblankIrqHandler + patchOffset + 0) = THUMB_LDR_PC_IMM(THUMB_R1, 0); // ldr r1,= address
         *(u16*)((u8*)_vblankIrqHandler + patchOffset + 2) = THUMB_BX(THUMB_R1); // bx r1
-        *(u32*)((u8*)_vblankIrqHandler + patchOffset + 4) = (u32)cheatEnginePatchCode->GetCheatEngineFunction(); // address
+        *(u32*)((u8*)_vblankIrqHandler + patchOffset + 4) = (u32)hookTarget; // address
     }
     else
     {
         *(u32*)((u8*)_vblankIrqHandler + patchOffset + 0) = 0xE51FF004; // ldr pc,= address
-        *(u32*)((u8*)_vblankIrqHandler + patchOffset + 4) = (u32)cheatEnginePatchCode->GetCheatEngineFunctionArm(); // address
+        *(u32*)((u8*)_vblankIrqHandler + patchOffset + 4) = (u32)hookTargetArm; // address
     }
-    LOG_DEBUG("Cheats enabled\n");
+    LOG_DEBUG("VBlank hook enabled\n");
 }

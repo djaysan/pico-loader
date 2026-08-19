@@ -1,6 +1,7 @@
 #pragma once
 #include "common.h"
 #include "../../include/picoLoader7.h"
+#include "fileInfo.h"
 #include "ndsHeader.h"
 #include "DsiWareSaveArranger.h"
 #include "BootMode.h"
@@ -62,12 +63,15 @@ private:
     u32 _argumentsLength = 0;
     const char* _arguments = nullptr;
     pload_cheats_t* _cheats = nullptr;
+    guide_file_info_t _guideFileInfo {};
+    bool _hasGuide = false;
     nds_header_twl_t _romHeader;
     bool _runInDSiMode = true;
     DsiWareSaveResult _dsiwareSaveResult;
 
     bool IsCloneBootRom(u32 romOffset);
     bool IsValidDSiRom();
+    void PrepareGuideFile();
     void ApplyArm7Patches();
     void PreprocessCheats();
     void SetupSharedMemory(u32 cardId, u32 agbMem, u32 resetParam, u32 romOffset, u32 bootType);

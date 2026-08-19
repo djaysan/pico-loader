@@ -16,6 +16,7 @@
 #include "patches/arm7/sdk5/Sdk5DsiSdCardRedirectPatch.h"
 #include "patches/arm7/PokemonDownloaderArm7Patch.h"
 #include "patches/arm7/cheats/CheatEnginePatch.h"
+#include "patches/arm7/guide/GuideMonitorPatchCode.h"
 #include "Arm7Patcher.h"
 
 static u32 correctAddress(u32 address, const nds_header_ntr_t* romHeader)
@@ -30,9 +31,11 @@ static u32 correctAddress(u32 address, const nds_header_ntr_t* romHeader)
     }
 }
 
-void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheatsLength, void*& cheatsPtr, bool runInDSiMode) const
+void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheatsLength, void*& cheatsPtr,
+    u32 guideInfoLength, void*& guideInfoPtr, bool runInDSiMode) const
 {
     cheatsPtr = nullptr;
+    guideInfoPtr = nullptr;
     auto romHeader = (const nds_header_ntr_t*)TWL_SHARED_MEMORY->ntrSharedMem.romHeader;
     auto twlRomHeader = (const nds_header_twl_t*)TWL_SHARED_MEMORY->twlRomHeader;
     ModuleParamsLocator moduleParamsLocator;
@@ -102,8 +105,25 @@ void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheats
             void* cheats = (void*)correctAddress(mainMemoryArenaLo, romHeader);
             LOG_DEBUG("Cheats placed at 0x%p\n", cheats);
             cheatsPtr = cheats;
-            patchCollection.AddPatch(new CheatEnginePatch(cheats));
             mainMemoryArenaLo += cheatsLength;
+        }
+
+        // The guide file info and the guide monitor code are placed in
+        // reserved main memory, so they add no pressure on the wram patch space.
+        void* guideMonitorTarget = nullptr;
+        if (guideInfoLength > 0)
+        {
+            mainMemoryArenaLo = (mainMemoryArenaLo + 3) & ~3u; // cheats length may be unaligned
+            guideInfoPtr = (void*)correctAddress(mainMemoryArenaLo, romHeader);
+            mainMemoryArenaLo += (guideInfoLength + 3) & ~3u;
+            guideMonitorTarget = (void*)correctAddress(mainMemoryArenaLo, romHeader);
+            mainMemoryArenaLo += (SECTION_SIZE(patch_guidemonitor) + 3) & ~3u;
+            LOG_DEBUG("Guide info placed at 0x%p\n", guideInfoPtr);
+        }
+
+        if (cheatsLength > 0 || guideInfoLength > 0)
+        {
+            patchCollection.AddPatch(new CheatEnginePatch(cheatsPtr, guideMonitorTarget, guideInfoPtr));
         }
 
         if (romHeader->unitCode == 0) // seems only present on NITRO, not on HYBRID or LIMITED

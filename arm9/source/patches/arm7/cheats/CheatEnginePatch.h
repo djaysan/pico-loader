@@ -1,18 +1,21 @@
 #pragma once
 #include "patches/Patch.h"
 
-/// @brief Arm7 patch for injecting the cheat engine in the vblank interrupt handler.
+/// @brief Arm7 patch for injecting the cheat engine and/or the guide monitor
+///        in the vblank interrupt handler.
 class CheatEnginePatch : public Patch
 {
 public:
-    explicit CheatEnginePatch(const void* cheats)
-        : _cheats(cheats) { }
+    CheatEnginePatch(const void* cheats, void* guideMonitorTarget, const void* guideInfo)
+        : _cheats(cheats), _guideMonitorTarget(guideMonitorTarget), _guideInfo(guideInfo) { }
 
     bool FindPatchTarget(PatchContext& patchContext) override;
     void ApplyPatch(PatchContext& patchContext) override;
 
 private:
     const void* _cheats;
+    void* _guideMonitorTarget;
+    const void* _guideInfo;
     u32* _vblankIrqHandler = nullptr;
     const u32* _foundPattern = nullptr;
     u16 _thumb = false;

@@ -562,16 +562,73 @@ void NdsLoader::HandleHomebrewPatching()
     }
 }
 
+void NdsLoader::PrepareGuideFile()
+{
+    _hasGuide = false;
+    if (_romPath == nullptr)
+    {
+        // Soft reset has no rom path; guides are only set up on a fresh launch
+        return;
+    }
+
+    // Derive /guides/<rom base>.txt from the rom path
+    const char* base = strrchr(_romPath, '/');
+    base = base ? base + 1 : _romPath;
+    const char* extension = strrchr(base, '.');
+    u32 baseLength = extension ? (u32)(extension - base) : strlen(base);
+    char guidePath[256];
+    if (sizeof("/guides/") + baseLength + sizeof(".txt") > sizeof(guidePath))
+    {
+        return;
+    }
+    strcpy(guidePath, "/guides/");
+    memcpy(&guidePath[8], base, baseLength);
+    strcpy(&guidePath[8 + baseLength], ".txt");
+
+    auto guideFile = std::make_unique<FIL>();
+    if (f_open(guideFile.get(), guidePath, FA_OPEN_EXISTING | FA_READ) != FR_OK)
+    {
+        LOG_DEBUG("No guide at %s\n", guidePath);
+        return;
+    }
+
+    DWORD* clusterTab = (DWORD*)_guideFileInfo.clusterMap;
+    clusterTab[0] = sizeof(_guideFileInfo.clusterMap) / sizeof(u32);
+    guideFile->cltbl = clusterTab;
+    FRESULT seekResult = f_lseek(guideFile.get(), CREATE_LINKMAP);
+    if (seekResult != FR_OK)
+    {
+        // Guide file too fragmented for the cluster map; boot without a guide
+        LOG_DEBUG("Failed to make guide cluster table. Result: %d\n", seekResult);
+        f_close(guideFile.get());
+        return;
+    }
+    _guideFileInfo.clusterShift = __builtin_ctz(guideFile->obj.fs->csize);
+    _guideFileInfo.database = guideFile->obj.fs->database;
+    _guideFileInfo.clusterMask = guideFile->obj.fs->csize - 1;
+    _guideFileInfo.fileSize = f_size(guideFile.get());
+    f_close(guideFile.get());
+    _hasGuide = true;
+    LOG_DEBUG("Guide %s: %d bytes\n", guidePath, _guideFileInfo.fileSize);
+}
+
 void NdsLoader::ApplyArm7Patches()
 {
+    PrepareGuideFile();
     sendToArm9(IPC_COMMAND_ARM9_APPLY_ARM7_PATCHES);
     sendToArm9(_cheats ? _cheats->length : 0);
+    sendToArm9(_hasGuide ? sizeof(guide_file_info_t) : 0);
     PreprocessCheats();
     void* patchSpaceStart = (void*)receiveFromArm9();
     void* cheatsPtr = (void*)receiveFromArm9();
+    void* guideInfoPtr = (void*)receiveFromArm9();
     if (cheatsPtr != nullptr && _cheats != nullptr)
     {
         memcpy(cheatsPtr, _cheats, _cheats->length);
+    }
+    if (guideInfoPtr != nullptr && _hasGuide)
+    {
+        memcpy(guideInfoPtr, &_guideFileInfo, sizeof(guide_file_info_t));
     }
     if (patchSpaceStart)
     {

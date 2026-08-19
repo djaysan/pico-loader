@@ -159,16 +159,19 @@ static void handleApplyArm9PatchesCommand()
     ipc_sendWordDirect(1);
 }
 
-static void handleApplyArm7PatchesCommand(u32 cheatsLength)
+static void handleApplyArm7PatchesCommand(u32 cheatsLength, u32 guideInfoLength)
 {
     void* cheats = nullptr;
-    void* patchSpaceStart = Arm7Patcher().ApplyPatches(sLoaderPlatform, cheatsLength, cheats, sRunInDSiMode);
+    void* guideInfo = nullptr;
+    void* patchSpaceStart = Arm7Patcher().ApplyPatches(sLoaderPlatform, cheatsLength, cheats,
+        guideInfoLength, guideInfo, sRunInDSiMode);
     if (sSoftResetCheatsPointer != nullptr)
     {
         *sSoftResetCheatsPointer = cheats;
     }
     ipc_sendWordDirect((u32)patchSpaceStart);
     ipc_sendWordDirect((u32)cheats);
+    ipc_sendWordDirect((u32)guideInfo);
 }
 
 static void handleSetAPInfoCommand()
@@ -315,7 +318,8 @@ static void handleArm7Command(u32 command)
         case IPC_COMMAND_ARM9_APPLY_ARM7_PATCHES:
         {
             u32 cheatsLength = receiveFromArm7();
-            handleApplyArm7PatchesCommand(cheatsLength);
+            u32 guideInfoLength = receiveFromArm7();
+            handleApplyArm7PatchesCommand(cheatsLength, guideInfoLength);
             break;
         }
         case IPC_COMMAND_ARM9_SET_AP_INFO:

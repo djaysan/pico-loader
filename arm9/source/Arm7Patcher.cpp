@@ -33,11 +33,13 @@ static u32 correctAddress(u32 address, const nds_header_ntr_t* romHeader)
 }
 
 void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheatsLength, void*& cheatsPtr,
-    u32 guideInfoLength, void*& guideInfoPtr, void*& guideOverlay9Ptr, bool runInDSiMode) const
+    u32 guideInfoLength, void*& guideInfoPtr, void*& guideOverlay9Ptr, void*& guideOverlay9RunPtr,
+    bool runInDSiMode) const
 {
     cheatsPtr = nullptr;
     guideInfoPtr = nullptr;
     guideOverlay9Ptr = nullptr;
+    guideOverlay9RunPtr = nullptr;
     auto romHeader = (const nds_header_ntr_t*)TWL_SHARED_MEMORY->ntrSharedMem.romHeader;
     auto twlRomHeader = (const nds_header_twl_t*)TWL_SHARED_MEMORY->twlRomHeader;
     ModuleParamsLocator moduleParamsLocator;
@@ -121,7 +123,11 @@ void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheats
             guideMonitorTarget = (void*)correctAddress(mainMemoryArenaLo, romHeader);
             mainMemoryArenaLo += (SECTION_SIZE(patch_guidemonitor) + 3) & ~3u;
             // Phase 3: also reserve the arm9-side overlay stub next to the
-            // guide info; installed later by GuideOverlay9Install.
+            // guide info; installed later by GuideOverlay9Install. The
+            // uncorrected arena address is the one the game's arm9 can
+            // reach at runtime (the corrected one is only for the loader's
+            // own writes, e.g. through the 16MB-mode mirror).
+            guideOverlay9RunPtr = (void*)mainMemoryArenaLo;
             guideOverlay9Ptr = (void*)correctAddress(mainMemoryArenaLo, romHeader);
             mainMemoryArenaLo += (SECTION_SIZE(patch_guideoverlay9) + 3) & ~3u;
             LOG_DEBUG("Guide info placed at 0x%p\n", guideInfoPtr);

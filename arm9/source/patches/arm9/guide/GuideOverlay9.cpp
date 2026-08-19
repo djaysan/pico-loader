@@ -5,90 +5,97 @@
 #include "GuideOverlay9PatchCode.h"
 #include "GuideOverlay9.h"
 
-// Same signatures as the arm7 cheat engine hook (CheatEnginePatch.cpp).
-// The SDK OS library is built from the same source for both CPUs, so the
-// arm9 OSi_IrqVBlank is expected to match the same patterns; the epilogue
-// check in GuideOverlay9Install catches the case where it doesn't.
-static const u32 sOSiIrqVBlankPattern0[] = { 0xE92D4008u, 0xE59F2038u, 0xE59F0038u, 0xE5921000u };
-static const u32 sOSiIrqVBlankPattern1[] = { 0xE92D4000u, 0xE24DD004u, 0xE59F003Cu, 0xE5902060u };
-static const u32 sOSiIrqVBlankPatternThumb0[] = { 0x4809B508u, 0x69024909u, 0x1C406808u, 0x2A006008u };
+// Full-prologue signatures of the SDK's per-frame vblank wait function on
+// the arm9 (derived from rom disassembly across SDK generations; each is
+// the first 16 bytes of the function). Unlike the arm7 OSi_IrqVBlank this
+// function differs per SDK generation, but is bit-identical between games
+// of the same generation. All variants take no arguments.
+//
+// sdk2: push {r4,r5,lr}; sub sp,#4; ldr r1,[pc,#0x98]; ldrh r0,[r1]
+static const u32 sVBlankWaitSdk2[] = { 0xE92D4030, 0xE24DD004, 0xE59F1098, 0xE1D100B0 };
+// sdk5: push {r4,r5,r6,lr}; ldr r0,[pc,#0x7C]; ldrh r1,[r0]; cmp r1,#0
+static const u32 sVBlankWaitSdk5[] = { 0xE92D4070, 0xE59F007C, 0xE1D010B0, 0xE3510000 };
+// sdk4 thumb: push {r3,r4,r5,lr}; ldr r0,[pc,#0x4C]; ldrh r1,[r0]; cmp r1,#0
+static const u32 sVBlankWaitSdk4Thumb[] = { 0x4813B538, 0x29008801, 0x2101D121, 0x21008001 };
+
+enum class Variant { None, Sdk2, Sdk5, Sdk4Thumb };
 
 static u32* sHookSite = nullptr;
-static u32 sPatchOffset = 0;
-static bool sThumb = false;
+static Variant sVariant = Variant::None;
 
 void GuideOverlay9FindHookSite(PatchContext& patchContext)
 {
-    sHookSite = patchContext.FindPattern32(sOSiIrqVBlankPattern0, sizeof(sOSiIrqVBlankPattern0));
-    if (sHookSite)
+    if ((sHookSite = patchContext.FindPattern32(sVBlankWaitSdk2, sizeof(sVBlankWaitSdk2))))
     {
-        sPatchOffset = 0x3C;
+        sVariant = Variant::Sdk2;
     }
-    else if ((sHookSite = patchContext.FindPattern32(sOSiIrqVBlankPattern1, sizeof(sOSiIrqVBlankPattern1))))
+    else if ((sHookSite = patchContext.FindPattern32(sVBlankWaitSdk5, sizeof(sVBlankWaitSdk5))))
     {
-        sPatchOffset = 0x40;
+        sVariant = Variant::Sdk5;
     }
-    else if ((sHookSite = patchContext.FindPattern32(sOSiIrqVBlankPatternThumb0, sizeof(sOSiIrqVBlankPatternThumb0))))
+    else if ((sHookSite = patchContext.FindPattern32(sVBlankWaitSdk4Thumb, sizeof(sVBlankWaitSdk4Thumb))))
     {
-        sPatchOffset = 0x20;
-        sThumb = true;
+        sVariant = Variant::Sdk4Thumb;
     }
 
     if (sHookSite)
     {
-        LOG_DEBUG("ARM9 OSi_IrqVBlank found at 0x%p\n", sHookSite);
+        LOG_DEBUG("ARM9 vblank wait found at 0x%p\n", sHookSite);
     }
     else
     {
-        LOG_DEBUG("ARM9 OSi_IrqVBlank not found; guide overlay disabled\n");
+        LOG_DEBUG("ARM9 vblank wait not found; guide overlay disabled\n");
     }
 }
 
-void GuideOverlay9Install(void* target)
+void GuideOverlay9Install(void* target, void* runTarget)
 {
-    if (!sHookSite)
+    if (!sHookSite || sVariant == Variant::None)
         return;
 
-    // The hook offsets were measured on the arm7 build of OSi_IrqVBlank.
-    // Only hook when the bytes there look like the function epilogue
-    // (ldmfd sp! / add sp adjustment, or pop / add sp in thumb); anything
-    // else means the arm9 build differs and overwriting it would crash the
-    // game at the first vblank. Skipping leaves the game fully playable.
-    u8* hookAt = (u8*)sHookSite + sPatchOffset;
-    bool looksLikeEpilogue;
-    if (sThumb)
+    // Bake the variant's literal slots into the loader's copy of the stub,
+    // then place it. The displaced prologue instructions with pc-relative
+    // loads are replayed from these slots (see GuideOverlay9PatchCode.s).
+    u32 site = (u32)sHookSite;
+    u32 runDelta = (u32)runTarget - (u32)SECTION_START(patch_guideoverlay9);
+    const void* entry;
+    switch (sVariant)
     {
-        u16 firstInstruction = *(u16*)hookAt;
-        looksLikeEpilogue = (firstInstruction & 0xFE00) == 0xBC00 || // pop {...}
-                            (firstInstruction & 0xFF80) == 0xB000;   // add sp, #imm
-    }
-    else
-    {
-        u32 firstInstruction = *(u32*)hookAt;
-        looksLikeEpilogue = (firstInstruction & 0xFFFF0000) == 0xE8BD0000 || // ldmfd sp!, {...}
-                            firstInstruction == 0xE28DD004;                  // add sp, sp, #4
-    }
-    if (!looksLikeEpilogue)
-    {
-        LOG_ERROR("ARM9 OSi_IrqVBlank epilogue mismatch at 0x%p, guide overlay disabled\n", hookAt);
-        return;
+        case Variant::Sdk2:
+            guideoverlay9_sdk2Return = site + 8;
+            entry = (const void*)((u32)guideoverlay9_entry_sdk2 + runDelta);
+            break;
+        case Variant::Sdk5:
+            guideoverlay9_sdk5Return = site + 8;
+            guideoverlay9_sdk5PoolValue = *(u32*)(site + 0x88); // pool word read by the displaced ldr r0
+            entry = (const void*)((u32)guideoverlay9_entry_sdk5 + runDelta);
+            break;
+        case Variant::Sdk4Thumb:
+            guideoverlay9_sdk4tReturn = (site + 8) | 1;
+            guideoverlay9_sdk4tPoolValue = *(u32*)(site + 0x50); // pool word read by the displaced ldr r0
+            entry = (const void*)((u32)guideoverlay9_entry_sdk4t + runDelta);
+            break;
+        default:
+            return;
     }
 
     memcpy(target, SECTION_START(patch_guideoverlay9), SECTION_SIZE(patch_guideoverlay9));
-    u32 targetDelta = (u32)target - (u32)SECTION_START(patch_guideoverlay9);
-    if (sThumb)
+
+    if (sVariant == Variant::Sdk4Thumb)
     {
-        *(u16*)(hookAt + 0) = THUMB_LDR_PC_IMM(THUMB_R1, 0); // ldr r1,= address
-        *(u16*)(hookAt + 2) = THUMB_BX(THUMB_R1); // bx r1
-        *(u32*)(hookAt + 4) = (u32)guideoverlay9_entry + targetDelta; // address
+        // r1 is clobbered, which is safe at the entry of a void function.
+        // The stub entry is arm code, so the address keeps bit 0 clear.
+        *(u16*)(site + 0) = THUMB_LDR_PC_IMM(THUMB_R1, 0); // ldr r1,= address
+        *(u16*)(site + 2) = THUMB_BX(THUMB_R1); // bx r1
+        *(u32*)(site + 4) = (u32)entry; // address
     }
     else
     {
-        *(u32*)(hookAt + 0) = 0xE51FF004; // ldr pc,= address
-        *(u32*)(hookAt + 4) = (u32)guideoverlay9_entry_arm + targetDelta; // address
+        *(u32*)(site + 0) = 0xE51FF004; // ldr pc,= address
+        *(u32*)(site + 4) = (u32)entry; // address
     }
     dc_flushAll();
     dc_drainWriteBuffer();
     ic_invalidateAll();
-    LOG_DEBUG("Guide overlay placed at 0x%p\n", target);
+    LOG_DEBUG("Guide overlay placed at 0x%p (runs at 0x%p)\n", target, runTarget);
 }

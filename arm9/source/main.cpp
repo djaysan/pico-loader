@@ -165,13 +165,14 @@ static void handleApplyArm7PatchesCommand(u32 cheatsLength, u32 guideInfoLength)
     void* cheats = nullptr;
     void* guideInfo = nullptr;
     void* guideOverlay9 = nullptr;
+    void* guideOverlay9Run = nullptr;
     void* patchSpaceStart = Arm7Patcher().ApplyPatches(sLoaderPlatform, cheatsLength, cheats,
-        guideInfoLength, guideInfo, guideOverlay9, sRunInDSiMode);
+        guideInfoLength, guideInfo, guideOverlay9, guideOverlay9Run, sRunInDSiMode);
     if (guideOverlay9 != nullptr)
     {
-        // The arm9 vblank hook site was located during the arm9 patch pass;
+        // The arm9 vblank wait site was located during the arm9 patch pass;
         // the resident memory for the stub only exists now.
-        GuideOverlay9Install(guideOverlay9);
+        GuideOverlay9Install(guideOverlay9, guideOverlay9Run);
     }
     if (sSoftResetCheatsPointer != nullptr)
     {

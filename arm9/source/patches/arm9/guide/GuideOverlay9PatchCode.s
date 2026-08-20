@@ -151,6 +151,16 @@ overlay_stub:
     orr   r0, r0, #4                 // marker bit2: overlay fired
     str   r0, [r8, #GD_MARKER]
 
+#if !GUIDE_OVERLAY_FREEZE
+    // Diagnostic build: the cacheless arm7 monitor reads GD_FRAMECOUNT from
+    // main memory, so clean the guide_data d-cache line and drain the write
+    // buffer here (GD_MARKER at +0 and GD_FRAMECOUNT at +0x14 share the line).
+    mcr   p15, 0, r8, c7, c10, 1     // clean d-cache line by MVA (guide_data)
+    mcr   p15, 0, r8, c7, c10, 4     // drain write buffer
+#endif
+
+#if GUIDE_OVERLAY_FREEZE
+    // ---- freeze/blank/resume path (proven; opt-in via GUIDE_OVERLAY_FREEZE) ----
     ldr   r1, ov_keyinput            // 0x04000130 REG_KEYINPUT
     ldr   r2, ov_keymask             // 0x304 = L | R | Select (active low)
     ldrh  r0, [r1]
@@ -158,7 +168,6 @@ overlay_stub:
     ands  r0, r0, r2
     bne   ov_chain                   // any of the three not held -> run normally
 
-    // ---- freeze ----
     ldr   r0, [r8, #GD_FREEZECOUNT]
     add   r0, r0, #1
     str   r0, [r8, #GD_FREEZECOUNT]
@@ -179,6 +188,10 @@ ov_spin:
     // ---- release: restore exactly ----
     strh  r6, [r4]
     strh  r7, [r5]
+#endif
+    // In the default (diagnostic) build there is NO freeze and NO display
+    // register access: the stub only advances GD_FRAMECOUNT / GD_MARKER above,
+    // which the arm7 monitor observes to prove the hook fires every frame.
 
 ov_chain:
     ldr   r0, [r8, #GD_DISPRETURN]   // dispatcher + 8 (loaded before r8 is restored)
@@ -186,6 +199,7 @@ ov_chain:
     mov   pc, r0                     // resume the original dispatcher; it recomputes r0-r3,r12
 
 .balign 4
+#if GUIDE_OVERLAY_FREEZE
 ov_keyinput:
     .word 0x04000130
 ov_keymask:
@@ -196,6 +210,7 @@ ov_mbB:
     .word 0x0400106C
 ov_black:
     .word 0x00008010
+#endif
 
 // ======================= shared state (guide_data) =======================
 // Layout must match the GD_* equ  offsets above and GuideOverlay9.h.

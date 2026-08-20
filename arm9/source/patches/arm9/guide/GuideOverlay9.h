@@ -19,3 +19,10 @@
 ///
 /// A miss (no card function, thumb, or an unrelocatable entry) is never fatal.
 void GuideOverlay9Install(PatchContext& patchContext, u32* cardiReadCard, bool cardThumb);
+
+/// @brief Runtime address of the overlay's guide_data block, published by
+///        GuideOverlay9Install so the (later) arm7 monitor pass can bake it in
+///        and observe GD_FRAMECOUNT / GD_MARKER from shared main memory. 0 when
+///        the overlay was not installed. Both patch passes run on the arm9
+///        loader in sequence, so this static carries across them.
+extern "C" u32 gGuideOverlayDataAddr;

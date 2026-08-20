@@ -3,6 +3,7 @@
 #include "thumbInstructions.h"
 #include "CheatEnginePatchCode.h"
 #include "patches/arm7/guide/GuideMonitorPatchCode.h"
+#include "patches/arm9/guide/GuideOverlay9.h"
 #include "CheatEnginePatch.h"
 
 static const u32 sOSiIrqVBlankPattern0[] = { 0xE92D4008u, 0xE59F2038u, 0xE59F0038u, 0xE5921000u };
@@ -69,6 +70,11 @@ void CheatEnginePatch::ApplyPatch(PatchContext& patchContext)
         // patch heap) and chains to the cheat engine when cheats are active.
         guidemonitor_guideInfoPtr = _guideInfo;
         guidemonitor_chainPtr = hookTarget;
+#if GUIDE_OVERLAY_STAGE_A
+        // Hand the arm7 monitor the arm9 overlay's guide_data address so it can
+        // observe GD_FRAMECOUNT / GD_MARKER and blip when the overlay fires.
+        guidemonitor_guideDataPtr = gGuideOverlayDataAddr;
+#endif
         memcpy(_guideMonitorTarget, SECTION_START(patch_guidemonitor), SECTION_SIZE(patch_guidemonitor));
         u32 targetDelta = (u32)_guideMonitorTarget - (u32)SECTION_START(patch_guidemonitor);
         hookTarget = (const void*)((u32)guidemonitor_entry + targetDelta);

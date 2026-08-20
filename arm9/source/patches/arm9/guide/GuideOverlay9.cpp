@@ -4,6 +4,9 @@
 #include "GuideOverlay9PatchCode.h"
 #include "GuideOverlay9.h"
 
+// Published for the arm7 monitor pass (see GuideOverlay9.h).
+u32 gGuideOverlayDataAddr = 0;
+
 // Bake a value into a field of the loader's own copy of guide_data, before
 // the blob is copied to its resident location.
 static inline void BakeDataField(u32 offset, u32 value)
@@ -52,6 +55,7 @@ void GuideOverlay9Install(PatchContext& patchContext, u32* cardiReadCard, bool c
 
     // Bake the literals/state into the loader's copy, then copy the whole blob.
     guide_dataAddr_lit   = base + ((u32)&guide_data - sectionStart);
+    gGuideOverlayDataAddr = guide_dataAddr_lit; // published for the arm7 monitor
     guide_cardReturn_lit = (u32)cardiReadCard + 4;   // resume at card entry + 4
     guide_replay_slot    = insn0;                    // replay the displaced instruction
     BakeDataField(GD_OVERLAYSTUB, stub);

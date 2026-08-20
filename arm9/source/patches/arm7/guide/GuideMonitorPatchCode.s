@@ -34,6 +34,45 @@ guidemonitor_entry_arm:
 guidemonitor_entry:
     push {r4}
 
+#if GUIDE_OVERLAY_STAGE_A
+    // Hardware Stage-A diagnostic (phase 3): beep a periodic blip whenever the
+    // arm9 overlay is firing - i.e. GD_FRAMECOUNT is advancing in shared main
+    // memory - with no L+R+Select needed. So a blip during normal gameplay =
+    // Stage A installed + ITCM dispatcher hooked + firing every frame. Kept
+    // distinct from the combo tone: channel 12, higher pitch, blip not steady.
+    // guide_data lives in the arm9 patch heap (shared main RAM), so the arm7
+    // reads it at the same address. No PMIC, no master/power writes.
+    ldr r0, guidemonitor_guideDataPtr
+    cmp r0, #0
+    beq diag_done                   // overlay not installed -> nothing
+    ldr r1, [r0, #0x14]             // GD_FRAMECOUNT
+    adr r4, diag_state
+    ldr r2, [r4]                    // last frame count seen
+    str r1, [r4]                    // remember current
+    cmp r1, r2
+    beq diag_off                    // not advancing -> not firing
+    ldr r2, [r4, #4]               // blip phase (period 48 frames)
+    adds r2, #1
+    cmp r2, #48
+    blt 1f
+    movs r2, #0
+1:
+    str r2, [r4, #4]
+    cmp r2, #6
+    bge diag_off                    // off part of the cycle
+    ldr r1, =0x040004C0             // SOUND12CNT
+    ldr r0, =0x0000FBE9             // SOUNDxTMR, ~2 kHz (combo tone is ~1 kHz)
+    strh r0, [r1, #8]
+    ldr r0, =0xE340407F             // start | PSG | 50% duty | center | full vol
+    str r0, [r1]
+    b diag_done
+diag_off:
+    ldr r1, =0x040004C0
+    movs r0, #0
+    str r0, [r1]                    // channel 12 off
+diag_done:
+#endif
+
     ldr r0, guidemonitor_guideInfoPtr
     cmp r0, #0
     beq monitor_end
@@ -107,6 +146,16 @@ guidemonitor_guideInfoPtr:
 .global guidemonitor_chainPtr
 guidemonitor_chainPtr:
     .word 0
+
+#if GUIDE_OVERLAY_STAGE_A
+diag_state:
+    .word 0 // last GD_FRAMECOUNT seen
+    .word 0 // blip phase counter
+
+.global guidemonitor_guideDataPtr
+guidemonitor_guideDataPtr:
+    .word 0 // baked: runtime address of the arm9 overlay guide_data
+#endif
 
 .pool
 .end

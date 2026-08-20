@@ -249,12 +249,16 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     // Phase-3 guide overlay Stage A: image-patch the card read entry the
     // loader located above to bootstrap the runtime ITCM dispatcher hook
     // (Stage B). The Stage B mechanism + overlay (freeze/blank/resume) are
-    // GDB-verified in melonDS (see PHASE3-PROGRESS.md). Stage A residency is
-    // NOT yet delivered in melonDS: the arm9 patch heap lives in the secure
-    // area, which melonDS wipes to 0xE7FFDEFF before gameplay, so the blob
-    // never survives to run. It may behave differently on hardware (untested).
-    // Disabled by default so a build from HEAD is the safe beep-only loader;
-    // set GUIDE_OVERLAY_STAGE_A to 1 only for a supervised hardware experiment.
+    // GDB-verified in melonDS (see PHASE3-PROGRESS.md). Stage A cannot be
+    // delivered in melonDS: a residency probe proved that NONE of the loader's
+    // arm9 memory writes survive to gameplay there (6/6 stamped locations gone,
+    // incl. one overwritten by fresh game code) - melonDS runs the game from a
+    // fresh arm9 and discards the whole loader-patched image, so the loader's
+    // own card/OSReset patches do not survive either (card reads work via
+    // melonDS's native cart handling). On hardware DSpico's arm9 patches must
+    // persist, so Stage A likely works there - untested. Disabled by default so
+    // a build from HEAD is the safe beep-only loader; set GUIDE_OVERLAY_STAGE_A
+    // to 1 only for a supervised hardware experiment.
 #ifndef GUIDE_OVERLAY_STAGE_A
 #define GUIDE_OVERLAY_STAGE_A 0
 #endif

@@ -1,22 +1,21 @@
 #pragma once
 #include "patches/PatchContext.h"
 
-/// @brief Finds the arm9 per-frame vblank wait function. Call during the
-///        arm9 patch pass; a miss is never fatal (the overlay degrades to
-///        the arm7 beep monitor only).
-void GuideOverlay9FindHookSite(PatchContext& patchContext);
-
-/// @brief Reserves stub space from the arm9 patch heap. Call after
-///        TryPerformPatches so existing patches get their space first;
-///        when nothing is left the overlay degrades to beep-only. The
-///        heap lives inside the game's own code image, which the arm9
-///        MPU allows executing from — unlike the arm7's main memory
-///        arena, where the first attempt at this stub died with a
-///        prefetch abort at boot.
-void GuideOverlay9ReserveStub(PatchContext& patchContext);
-
-/// @brief Bakes the variant literals into the overlay stub, copies it to
-///        the reserved heap space and detours the vblank wait entry to
-///        it. Call only when a guide is present. No-ops when the site
-///        was not found or no stub space could be reserved.
-void GuideOverlay9Install();
+/// @brief Installs the phase-3 two-stage guide overlay bootstrap.
+///
+/// The arm9 per-frame IRQ dispatcher is built at runtime in ITCM and is not
+/// present in the rom image, so it cannot be hooked at patch time. Instead
+/// this places a resident blob and image-patches the entry of the card read
+/// function (already located by the loader) with a branch into it. At runtime
+/// the blob's installer scans ITCM for the dispatcher and detours it into the
+/// per-frame overlay stub (freeze + blank + resume). See PHASE3-FINDINGS.md
+/// and GuideOverlay9PatchCode.s.
+///
+/// @param patchContext  The arm9 patch context (for the patch heap).
+/// @param cardiReadCard The card read function entry the loader found, or
+///                      nullptr to skip (degrades to the arm7 beep monitor).
+/// @param cardThumb     True if that function is thumb (currently unsupported;
+///                      the overlay is skipped, never mis-hooked).
+///
+/// A miss (no card function, thumb, or an unrelocatable entry) is never fatal.
+void GuideOverlay9Install(PatchContext& patchContext, u32* cardiReadCard, bool cardThumb);

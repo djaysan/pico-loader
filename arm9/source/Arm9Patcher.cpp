@@ -167,12 +167,15 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     };
     PatchCollection patchCollection;
     OSResetSystemPatch* osResetSystemPatch = nullptr;
+    CardiReadCardPatch* cardiReadCardPatch = nullptr;
     if (sdkVersion != 0)
     {
-        // NOTE: the arm9 guide overlay hook is disabled. The arm9 per-frame
-        // handler (OS irq dispatcher) is built at runtime inside ITCM and is
-        // not present in the rom image, so it cannot be hooked by image
-        // patching the way the arm7 monitor is. See PHASE3-FINDINGS.md.
+        // The arm9 per-frame handler (OS irq dispatcher) is built at runtime
+        // inside ITCM and is not present in the rom image, so it cannot be
+        // hooked by image patching (see PHASE3-FINDINGS.md). The guide overlay
+        // instead bootstraps at runtime: the card read entry (located below)
+        // is detoured to a resident installer that hooks the ITCM dispatcher
+        // once it exists. Installed after the patch pass (GuideOverlay9Install).
 
         if (*(vu32*)0x02FFF00C == GAMECODE("ADAJ") &&
             romHeader->arm9LoadAddress == 0x02004000 &&
@@ -219,7 +222,8 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
         }
         else
         {
-            patchCollection.AddPatch(new CardiReadCardPatch());
+            cardiReadCardPatch = new CardiReadCardPatch();
+            patchCollection.AddPatch(cardiReadCardPatch);
             patchCollection.AddPatch(new CardiTryReadCardDmaPatch());
         }
 
@@ -241,6 +245,29 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     {
         ErrorDisplay().PrintError("Failed to apply arm9 patches.");
     }
+
+    // Phase-3 guide overlay Stage A: image-patch the card read entry the
+    // loader located above to bootstrap the runtime ITCM dispatcher hook
+    // (Stage B). The Stage B mechanism + overlay (freeze/blank/resume) are
+    // GDB-verified in melonDS (see PHASE3-PROGRESS.md). Stage A residency is
+    // NOT yet delivered in melonDS: the arm9 patch heap lives in the secure
+    // area, which melonDS wipes to 0xE7FFDEFF before gameplay, so the blob
+    // never survives to run. It may behave differently on hardware (untested).
+    // Disabled by default so a build from HEAD is the safe beep-only loader;
+    // set GUIDE_OVERLAY_STAGE_A to 1 only for a supervised hardware experiment.
+#ifndef GUIDE_OVERLAY_STAGE_A
+#define GUIDE_OVERLAY_STAGE_A 0
+#endif
+#if GUIDE_OVERLAY_STAGE_A
+    if (cardiReadCardPatch)
+    {
+        GuideOverlay9Install(patchContext, cardiReadCardPatch->GetCardiReadCard(),
+            cardiReadCardPatch->IsThumb());
+    }
+#else
+    (void)cardiReadCardPatch;
+#endif
+
     dc_flushAll();
     dc_drainWriteBuffer();
     ic_invalidateAll();

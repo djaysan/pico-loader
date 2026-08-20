@@ -2,140 +2,217 @@
 .section "patch_guideoverlay9", "ax"
 .syntax unified
 
-// In-game guide overlay, phase 3 milestone 1: freeze + blank + resume.
+// In-game guide overlay, phase 3 milestone 1: two-stage runtime bootstrap.
 //
-// Detours the entry of the SDK's per-frame vblank wait function on the
-// arm9 (located by full-prologue signature; the function takes no
-// arguments in all known variants, so r0-r3 are free at entry). This is
-// thread context with IRQs enabled: while frozen, sound and the game's
-// interrupt handlers keep running, and on release the game just sees one
-// very long vblank wait.
+// The arm9 per-frame IRQ dispatcher is built at runtime inside ITCM by the
+// game's OS_Init; it is NOT present in the rom image, so the loader cannot
+// hook it by image patching (see PHASE3-FINDINGS.md). Instead:
 //
-// While L+R+Select is held: save both MASTER_BRIGHT registers, force
-// both engines to black, spin polling REG_KEYINPUT. On release: restore
-// MASTER_BRIGHT exactly, then re-execute the two displaced prologue
-// instructions of the variant and jump back into the original function.
-// Displaced pc-relative loads are replayed via literal slots the
-// installer bakes in (GuideOverlay9Install).
+//   Stage A (guide_tramp): the loader image-patches the entry of the card
+//     read function (CARDi_ReadCard, which the loader already locates) with a
+//     branch to guide_tramp. That runs during gameplay AFTER OS_Init has
+//     populated ITCM. It calls guide_installer once, replays the displaced
+//     first instruction, then continues the original function.
 //
-// The state word guards against a second thread entering the wait
-// function while frozen: it replays straight through without freezing.
+//   Stage B (guide_installer): at runtime it scans ITCM for the dispatcher
+//     prologue (sub lr,lr,#4 ; stmfd sp!,{r0-r3,r12,lr}), and once found
+//     overwrites those two instructions with a jump into overlay_stub, which
+//     is the real per-frame hook. Idempotent via installedFlag.
 //
-// Position independent (copied to reserved main memory).
+//   overlay_stub: runs at the head of every IRQ dispatch. While L+R+Select
+//     is held it saves both MASTER_BRIGHT registers, forces both engines to
+//     black and spins polling the keys (that is the freeze; the arm7 keeps
+//     running). On release it restores MASTER_BRIGHT exactly, then replays
+//     the two displaced dispatcher instructions and jumps back in, so the
+//     game resumes exactly. When the combo is not held it chains straight
+//     through every frame. No VRAM/palette/SD/PMIC access.
+//
+// Whole blob is position independent (copied to reserved patch-heap memory).
+// All shared state lives in guide_data; code reaches it through the single
+// baked absolute pointer in guide_dataAddr_lit. Keep the GD_* offsets below
+// in sync with GuideOverlay9.h.
+
+.equ GD_MARKER,      0x00   // progress bits (runtime): bit0 installer ran, bit1 dispatcher patched, bit2 overlay fired
+.equ GD_INSTALLED,   0x04   // 0/1 (runtime)
+.equ GD_DISPATCHER,  0x08   // dispatcher addr found in ITCM (runtime)
+.equ GD_DISPRETURN,  0x0C   // dispatcher addr + 8 (runtime; overlay chains here)
+.equ GD_OVERLAYSTUB, 0x10   // baked: runtime address of overlay_stub
+.equ GD_FRAMECOUNT,  0x14   // runtime: overlay increments every dispatch
+.equ GD_FREEZECOUNT, 0x18   // runtime: overlay increments on each freeze entry
+.equ GD_LASTKEYS,    0x1C   // runtime: last REG_KEYINPUT read
+.equ GD_SAVEDA,      0x20   // runtime: saved MASTER_BRIGHT engine A during freeze
+.equ GD_SAVEDB,      0x24   // runtime: saved MASTER_BRIGHT engine B during freeze
+.equ GD_CARDENTRY,   0x28   // baked debug: card function address hooked
+.equ GD_ORIGINSN0,   0x2C   // baked debug: original displaced card instruction
 
 .arm
 
-// == shared combo/freeze core; preserves r0-r3, returns via lr ==
-overlay_core:
-    push {r0-r3}
-    adr r12, overlay_state
-    ldr r0, [r12]
-    cmp r0, #0
-    bne core_done // reentered while frozen
-
-    ldr r1, =0x04000130 // REG_KEYINPUT
-    ldr r2, =0x304 // L | R | Select (active low)
-    ldrh r0, [r1]
-    ands r0, r0, r2
-    bne core_done // combo not (fully) held
-
-    // == freeze ==
-    mov r0, #1
-    str r0, [r12]
-    ldr r3, =0x0400006C // MASTER_BRIGHT engine A
-    ldrh r0, [r3]
-    str r0, [r12, #4] // save A
-    ldr r3, =0x0400106C // MASTER_BRIGHT engine B
-    ldrh r0, [r3]
-    str r0, [r12, #8] // save B
-    ldr r0, =0x8010 // force brightness down by 16 = black
-    ldr r3, =0x0400006C
-    strh r0, [r3]
-    ldr r3, =0x0400106C
-    strh r0, [r3]
-
-spin:
-    ldrh r0, [r1]
-    ands r0, r0, r2
-    beq spin // all three still held
-
-    // == release: restore and resume ==
-    ldr r3, =0x0400006C
-    ldr r0, [r12, #4]
-    strh r0, [r3]
-    ldr r3, =0x0400106C
-    ldr r0, [r12, #8]
-    strh r0, [r3]
-    mov r0, #0
-    str r0, [r12]
-
-core_done:
-    pop {r0-r3}
-    bx lr
-
-// == sdk2 variant (arm) ==
-// displaced: push {r4, r5, lr}; sub sp, #4 (both position independent)
-.global guideoverlay9_entry_sdk2
-.type guideoverlay9_entry_sdk2, %function
-guideoverlay9_entry_sdk2:
-    push {lr}
-    bl overlay_core
-    pop {lr}
-    push {r4, r5, lr}
-    sub sp, sp, #4
-    ldr pc, guideoverlay9_sdk2Return
-
-// == sdk5 variant (arm) ==
-// displaced: push {r4, r5, r6, lr}; ldr r0, [pc-relative pool]
-.global guideoverlay9_entry_sdk5
-.type guideoverlay9_entry_sdk5, %function
-guideoverlay9_entry_sdk5:
-    push {lr}
-    bl overlay_core
-    pop {lr}
-    push {r4, r5, r6, lr}
-    ldr r0, guideoverlay9_sdk5PoolValue
-    ldr pc, guideoverlay9_sdk5Return
-
-// == sdk4 thumb variant; entered in arm state via ldr r1/bx r1 hook ==
-// displaced: push {r3, r4, r5, lr}; ldr r0, [pool]; ldrh r1, [r0]; cmp r1, #0
-// The cmp flags survive the bx back into the original thumb code.
-.global guideoverlay9_entry_sdk4t
-.type guideoverlay9_entry_sdk4t, %function
-guideoverlay9_entry_sdk4t:
-    push {lr}
-    bl overlay_core
-    pop {lr}
-    push {r3, r4, r5, lr}
-    ldr r0, guideoverlay9_sdk4tPoolValue
-    ldrh r1, [r0]
-    cmp r1, #0
-    ldr r12, guideoverlay9_sdk4tReturn
-    bx r12
+// ======================= Stage A: card-entry trampoline =======================
+// Entered via `b guide_tramp` written over the card function's first
+// instruction. r0-r3 hold the card args, lr the game caller. Preserve
+// everything; run the installer once; replay the displaced instruction; go.
+.global guide_tramp
+.type guide_tramp, %function
+guide_tramp:
+    stmfd sp!, {r0-r3, r12, lr}
+    bl    guide_installer
+    ldmfd sp!, {r0-r3, r12, lr}
+.global guide_replay_slot
+guide_replay_slot:
+    nop                              // C bakes the displaced card instruction here
+    ldr   pc, guide_cardReturn_lit   // -> card function + 4
 
 .balign 4
+.global guide_cardReturn_lit
+guide_cardReturn_lit:
+    .word 0                          // C bakes: card entry + 4
+.global guide_dataAddr_lit
+guide_dataAddr_lit:
+    .word 0                          // C bakes: absolute address of guide_data
 
-overlay_state:
-    .word 0 // frozen reentry guard
-    .word 0 // saved MASTER_BRIGHT A
-    .word 0 // saved MASTER_BRIGHT B
+// ======================= Stage B: runtime installer =======================
+// Scan ITCM for the dispatcher prologue; on first find, detour it into
+// overlay_stub. Idempotent.
+.type guide_installer, %function
+guide_installer:
+    stmfd sp!, {r0-r8, lr}
+    ldr   r8, guide_dataAddr_lit
+    // marker bit0: installer ran
+    ldr   r0, [r8, #GD_MARKER]
+    orr   r0, r0, #1
+    str   r0, [r8, #GD_MARKER]
 
-// Literal slots baked in by GuideOverlay9Install before the copy.
-.global guideoverlay9_sdk2Return
-guideoverlay9_sdk2Return:
-    .word 0
-.global guideoverlay9_sdk5Return
-guideoverlay9_sdk5Return:
-    .word 0
-.global guideoverlay9_sdk5PoolValue
-guideoverlay9_sdk5PoolValue:
-    .word 0
-.global guideoverlay9_sdk4tReturn
-guideoverlay9_sdk4tReturn:
-    .word 0
-.global guideoverlay9_sdk4tPoolValue
-guideoverlay9_sdk4tPoolValue:
-    .word 0
+    ldr   r0, [r8, #GD_INSTALLED]
+    cmp   r0, #0
+    bne   gi_ret
 
-.pool
+    mov   r1, #0x01000000            // ITCM scan start
+    add   r2, r1, #0x8000            // ITCM scan end (32KB)
+    ldr   r5, gi_sig0                // sub lr,lr,#4
+    ldr   r6, gi_sig1               // stmfd sp!,{r0-r3,r12,lr}
+gi_loop:
+    ldr   r3, [r1]
+    cmp   r3, r5
+    bne   gi_cont
+    ldr   r3, [r1, #4]
+    cmp   r3, r6
+    beq   gi_found
+gi_cont:
+    add   r1, r1, #4
+    cmp   r1, r2
+    blo   gi_loop
+    b     gi_ret                     // not present yet; try again next card read
+
+gi_found:
+    str   r1, [r8, #GD_DISPATCHER]
+    add   r3, r1, #8
+    str   r3, [r8, #GD_DISPRETURN]   // overlay chains to dispatcher+8
+    ldr   r0, [r8, #GD_OVERLAYSTUB]  // baked runtime address of overlay_stub
+    ldr   r3, gi_ldrpc               // ldr pc,[pc,#-4]
+    str   r3, [r1]                   // overwrite `sub lr,lr,#4`
+    str   r0, [r1, #4]               // overwrite `stmfd ...` with target word
+    mov   r0, #1
+    str   r0, [r8, #GD_INSTALLED]
+    ldr   r0, [r8, #GD_MARKER]
+    orr   r0, r0, #2                 // marker bit1: dispatcher patched
+    str   r0, [r8, #GD_MARKER]
+    // publish the ITCM write + make the icache refetch it
+    mov   r0, #0
+    mcr   p15, 0, r0, c7, c10, 4     // drain write buffer
+    mcr   p15, 0, r0, c7, c5, 0      // invalidate entire icache
+
+gi_ret:
+    ldmfd sp!, {r0-r8, lr}
+    bx    lr
+
+.balign 4
+gi_sig0:
+    .word 0xE24EE004                 // sub lr, lr, #4
+gi_sig1:
+    .word 0xE92D500F                 // stmfd sp!, {r0-r3, r12, lr}
+gi_ldrpc:
+    .word 0xE51FF004                 // ldr pc, [pc, #-4]
+
+// ======================= per-frame overlay stub =======================
+// Reached from the detoured dispatcher entry, in IRQ mode with IRQs masked.
+// The stack frame it leaves for dispatcher+8 must be exactly {r0-r3,r12,lr}.
+.global overlay_stub
+.type overlay_stub, %function
+overlay_stub:
+    sub   lr, lr, #4                 // displaced dispatcher insn 1
+    stmfd sp!, {r0-r3, r12, lr}      // displaced dispatcher insn 2 (interrupted ctx)
+    stmfd sp!, {r4-r8}               // private scratch (restored before chaining)
+    ldr   r8, guide_dataAddr_lit
+
+    ldr   r0, [r8, #GD_FRAMECOUNT]   // proves per-frame firing over gdb
+    add   r0, r0, #1
+    str   r0, [r8, #GD_FRAMECOUNT]
+    ldr   r0, [r8, #GD_MARKER]
+    orr   r0, r0, #4                 // marker bit2: overlay fired
+    str   r0, [r8, #GD_MARKER]
+
+    ldr   r1, ov_keyinput            // 0x04000130 REG_KEYINPUT
+    ldr   r2, ov_keymask             // 0x304 = L | R | Select (active low)
+    ldrh  r0, [r1]
+    str   r0, [r8, #GD_LASTKEYS]
+    ands  r0, r0, r2
+    bne   ov_chain                   // any of the three not held -> run normally
+
+    // ---- freeze ----
+    ldr   r0, [r8, #GD_FREEZECOUNT]
+    add   r0, r0, #1
+    str   r0, [r8, #GD_FREEZECOUNT]
+    ldr   r4, ov_mbA                 // 0x0400006C MASTER_BRIGHT engine A
+    ldr   r5, ov_mbB                 // 0x0400106C MASTER_BRIGHT engine B
+    ldrh  r6, [r4]                   // save A
+    ldrh  r7, [r5]                   // save B
+    str   r6, [r8, #GD_SAVEDA]
+    str   r7, [r8, #GD_SAVEDB]
+    ldr   r0, ov_black               // 0x8010 = brightness down by 16 (black)
+    strh  r0, [r4]
+    strh  r0, [r5]
+ov_spin:
+    ldrh  r0, [r1]
+    ands  r0, r0, r2
+    beq   ov_spin                    // all three still held -> stay frozen
+
+    // ---- release: restore exactly ----
+    strh  r6, [r4]
+    strh  r7, [r5]
+
+ov_chain:
+    ldr   r0, [r8, #GD_DISPRETURN]   // dispatcher + 8 (loaded before r8 is restored)
+    ldmfd sp!, {r4-r8}               // restore private scratch (r0 preserved)
+    mov   pc, r0                     // resume the original dispatcher; it recomputes r0-r3,r12
+
+.balign 4
+ov_keyinput:
+    .word 0x04000130
+ov_keymask:
+    .word 0x00000304
+ov_mbA:
+    .word 0x0400006C
+ov_mbB:
+    .word 0x0400106C
+ov_black:
+    .word 0x00008010
+
+// ======================= shared state (guide_data) =======================
+// Layout must match the GD_* equ  offsets above and GuideOverlay9.h.
+.balign 4
+.global guide_data
+guide_data:
+    .word 0   // GD_MARKER
+    .word 0   // GD_INSTALLED
+    .word 0   // GD_DISPATCHER
+    .word 0   // GD_DISPRETURN
+    .word 0   // GD_OVERLAYSTUB (baked)
+    .word 0   // GD_FRAMECOUNT
+    .word 0   // GD_FREEZECOUNT
+    .word 0   // GD_LASTKEYS
+    .word 0   // GD_SAVEDA
+    .word 0   // GD_SAVEDB
+    .word 0   // GD_CARDENTRY (baked debug)
+    .word 0   // GD_ORIGINSN0 (baked debug)
+
 .end

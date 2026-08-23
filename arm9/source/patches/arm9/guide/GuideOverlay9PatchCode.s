@@ -14,6 +14,14 @@
 #ifndef EXIT_TO_LAUNCHER
 #define EXIT_TO_LAUNCHER 0
 #endif
+// EXIT_DIAG=1 keeps the detour and the blob exactly as they are but never
+// calls the key check, so guide_tramp becomes a pure pass-through: replay the
+// displaced instruction, jump back. guide_exitCheck is still assembled, so the
+// blob is the same size and the patch heap sees the same allocation - the only
+// variable left is whether the trampoline itself works.
+#ifndef EXIT_DIAG
+#define EXIT_DIAG 0
+#endif
 
 // In-game guide overlay, phase 3 milestone 1: two-stage runtime bootstrap.
 //
@@ -75,7 +83,7 @@
 .type guide_tramp, %function
 guide_tramp:
     stmfd sp!, {r0-r3, r12, lr}
-#if EXIT_TO_LAUNCHER
+#if EXIT_TO_LAUNCHER && !EXIT_DIAG
     bl    guide_exitCheck
 #endif
 #if GUIDE_OVERLAY_STAGE_B

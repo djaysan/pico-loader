@@ -45,6 +45,12 @@ endif
 ifeq ($(EXIT_TO_LAUNCHER),1)
 DEFINES		+= -DEXIT_TO_LAUNCHER=1
 endif
+# EXIT_DIAG=1 : install the detour but never run the key check. Same blob, same
+#               heap allocation, pass-through trampoline - isolates "does the
+#               Stage-A trampoline work at all" from the exit code itself.
+ifeq ($(EXIT_DIAG),1)
+DEFINES		+= -DEXIT_TO_LAUNCHER=1 -DEXIT_DIAG=1
+endif
 
 # Libraries
 # ---------

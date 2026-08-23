@@ -16,9 +16,14 @@
 ///                      nullptr to skip (degrades to the arm7 beep monitor).
 /// @param cardThumb     True if that function is thumb (currently unsupported;
 ///                      the overlay is skipped, never mis-hooked).
+/// @param rebootEntry   Address of the patched OS_ResetSystem tail, or 0. With
+///                      EXIT_TO_LAUNCHER the resident blob jumps here while
+///                      L+R+Start+Select is held, which leaves the game without
+///                      needing the per-frame hook at all.
 ///
 /// A miss (no card function, thumb, or an unrelocatable entry) is never fatal.
-void GuideOverlay9Install(PatchContext& patchContext, u32* cardiReadCard, bool cardThumb);
+void GuideOverlay9Install(PatchContext& patchContext, u32* cardiReadCard, bool cardThumb,
+    u32 rebootEntry);
 
 /// @brief Runtime address of the overlay's guide_data block, published by
 ///        GuideOverlay9Install so the (later) arm7 monitor pass can bake it in

@@ -2,6 +2,19 @@
 .section "patch_guideoverlay9", "ax"
 .syntax unified
 
+// Stage B (the ITCM dispatcher hook) is what Stage A was built for, but an
+// exit-only build wants the residency without the ITCM write, so it gets its
+// own switch. Defaulting to Stage A keeps every existing build identical.
+#ifndef GUIDE_OVERLAY_STAGE_A
+#define GUIDE_OVERLAY_STAGE_A 0
+#endif
+#ifndef GUIDE_OVERLAY_STAGE_B
+#define GUIDE_OVERLAY_STAGE_B GUIDE_OVERLAY_STAGE_A
+#endif
+#ifndef EXIT_TO_LAUNCHER
+#define EXIT_TO_LAUNCHER 0
+#endif
+
 // In-game guide overlay, phase 3 milestone 1: two-stage runtime bootstrap.
 //
 // The arm9 per-frame IRQ dispatcher is built at runtime inside ITCM by the
@@ -13,6 +26,13 @@
 //     branch to guide_tramp. That runs during gameplay AFTER OS_Init has
 //     populated ITCM. It calls guide_installer once, replays the displaced
 //     first instruction, then continues the original function.
+//
+//   EXIT_TO_LAUNCHER (guide_exitCheck): Stage A on its own is already enough
+//     to leave a game. On every card read it samples the keys and, while
+//     L+R+Start+Select is held, jumps to the OS_ResetSystem tail the loader
+//     has already patched to reboot into Pico Loader. No ITCM write and no
+//     per-frame hook, so it is the cheapest hardware proof that Stage A code
+//     really is resident during gameplay.
 //
 //   Stage B (guide_installer): at runtime it scans ITCM for the dispatcher
 //     prologue (sub lr,lr,#4 ; stmfd sp!,{r0-r3,r12,lr}), and once found
@@ -55,7 +75,12 @@
 .type guide_tramp, %function
 guide_tramp:
     stmfd sp!, {r0-r3, r12, lr}
+#if EXIT_TO_LAUNCHER
+    bl    guide_exitCheck
+#endif
+#if GUIDE_OVERLAY_STAGE_B
     bl    guide_installer
+#endif
     ldmfd sp!, {r0-r3, r12, lr}
 .global guide_replay_slot
 guide_replay_slot:
@@ -69,7 +94,59 @@ guide_cardReturn_lit:
 .global guide_dataAddr_lit
 guide_dataAddr_lit:
     .word 0                          // C bakes: absolute address of guide_data
+.global guide_rebootEntry_lit
+guide_rebootEntry_lit:
+    .word 0                          // C bakes: patched OS_ResetSystem tail, or 0
 
+#if EXIT_TO_LAUNCHER
+// ======================= exit to launcher =======================
+// Returns normally unless the combo is held, in which case it never returns.
+//
+// The reboot tail is written to be entered from the game's own OS_ResetSystem,
+// which has already torn the game down by then. Coming in cold from a card read
+// skips that, so do the two parts of the teardown that would otherwise corrupt
+// the load: stop interrupts (the game's vblank handler would keep drawing into
+// vram that the tail remaps to LCDC) and stop the arm9 dma channels (an
+// in-flight transfer would write over the loader as it is read in). Everything
+// else the tail handles itself - its first act is to reset the arm7, which
+// stops sound and touch.
+.type guide_exitCheck, %function
+guide_exitCheck:
+    ldr   r1, ex_keyinput
+    ldrh  r0, [r1]
+    ldr   r1, ex_keymask             // L | R | Start | Select, active low
+    ands  r0, r0, r1
+    bxne  lr                         // any of the four not held -> carry on
+    ldr   r0, guide_rebootEntry_lit
+    cmp   r0, #0
+    bxeq  lr                         // no reboot tail on this game -> carry on
+
+    ldr   r1, ex_regIme
+    mov   r2, #0
+    str   r2, [r1]                   // REG_IME = 0
+
+    ldr   r1, ex_regDma0Cnt
+    str   r2, [r1]                   // DMA0CNT
+    str   r2, [r1, #0xC]             // DMA1CNT
+    str   r2, [r1, #0x18]            // DMA2CNT
+    str   r2, [r1, #0x24]            // DMA3CNT
+
+    mcr   p15, 0, r2, c7, c10, 4     // drain write buffer
+    mcr   p15, 0, r2, c7, c5, 0      // invalidate icache
+    bx    r0                         // thumb bit is set in the baked literal
+
+.balign 4
+ex_keyinput:
+    .word 0x04000130
+ex_keymask:
+    .word 0x0000030C
+ex_regIme:
+    .word 0x04000208
+ex_regDma0Cnt:
+    .word 0x040000B8
+#endif
+
+#if GUIDE_OVERLAY_STAGE_B
 // ======================= Stage B: runtime installer =======================
 // Scan ITCM for the dispatcher prologue; on first find, detour it into
 // overlay_stub. Idempotent.
@@ -211,9 +288,15 @@ ov_mbB:
 ov_black:
     .word 0x00008010
 #endif
+#endif // GUIDE_OVERLAY_STAGE_B
 
+#if GUIDE_OVERLAY_STAGE_B
 // ======================= shared state (guide_data) =======================
 // Layout must match the GD_* equ  offsets above and GuideOverlay9.h.
+// Only Stage B and the arm7 diagnostic read it, so an exit-only build leaves
+// it out entirely - the arm9 patch heap is 0x500 bytes shared with every other
+// patch, and 48 bytes of state nothing reads is 48 bytes that could be the
+// difference between the blob fitting and not.
 .balign 4
 .global guide_data
 guide_data:
@@ -229,5 +312,6 @@ guide_data:
     .word 0   // GD_SAVEDB
     .word 0   // GD_CARDENTRY (baked debug)
     .word 0   // GD_ORIGINSN0 (baked debug)
+#endif // GUIDE_OVERLAY_STAGE_B
 
 .end

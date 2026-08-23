@@ -38,6 +38,14 @@ ifeq ($(GUIDE_OVERLAY_FREEZE),1)
 DEFINES		+= -DGUIDE_OVERLAY_STAGE_A=1 -DGUIDE_OVERLAY_FREEZE=1
 endif
 
+# EXIT_TO_LAUNCHER=1 : leave a running game with L+R+Start+Select. Uses the
+#                     Stage-A resident blob only - no ITCM write, no per-frame
+#                     hook - so it is also the cheapest hardware proof that
+#                     Stage A residency works. Independent of STAGE_A/FREEZE.
+ifeq ($(EXIT_TO_LAUNCHER),1)
+DEFINES		+= -DEXIT_TO_LAUNCHER=1
+endif
+
 # Libraries
 # ---------
 

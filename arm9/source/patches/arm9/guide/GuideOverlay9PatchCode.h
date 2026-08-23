@@ -28,3 +28,4 @@ extern "C" u8 guide_data[];
 extern "C" u32 guide_replay_slot;      // the displaced card instruction to replay
 extern "C" u32 guide_cardReturn_lit;   // card entry + 4
 extern "C" u32 guide_dataAddr_lit;     // absolute runtime address of guide_data
+extern "C" u32 guide_rebootEntry_lit;  // patched OS_ResetSystem tail, or 0

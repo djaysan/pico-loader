@@ -17,8 +17,17 @@ public:
         return _cheatsPointer;
     }
 
+    /// @brief Runtime address of the patched OS_ResetSystem tail in the game's
+    ///        memory, thumb bit set, or 0 when the patch did not apply.
+    ///        Branching here reboots into Pico Loader; it never returns.
+    u32 GetRebootEntry() const
+    {
+        return _rebootEntry;
+    }
+
 private:
     u32* _osResetSystem = nullptr;
+    u32 _rebootEntry = 0;
     u16 _hybrid = false;
     u16 _runInDSiMode;
     const loader_info_t* _loaderInfo;

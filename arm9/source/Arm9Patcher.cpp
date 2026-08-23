@@ -168,6 +168,7 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     PatchCollection patchCollection;
     OSResetSystemPatch* osResetSystemPatch = nullptr;
     CardiReadCardPatch* cardiReadCardPatch = nullptr;
+    CardiReadRomWithCpuPatch* cardiReadRomWithCpuPatch = nullptr;
     if (sdkVersion != 0)
     {
         // The arm9 per-frame handler (OS irq dispatcher) is built at runtime
@@ -212,7 +213,8 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
             if (!twlRomHeader->IsDsiWare())
             {
                 patchCollection.AddPatch(new CardiIsRomDmaAvailablePatch());
-                patchCollection.AddPatch(new CardiReadRomWithCpuPatch());
+                cardiReadRomWithCpuPatch = new CardiReadRomWithCpuPatch();
+                patchCollection.AddPatch(cardiReadRomWithCpuPatch);
 
                 if (runInDSiMode)
                 {
@@ -262,14 +264,32 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
 #ifndef GUIDE_OVERLAY_STAGE_A
 #define GUIDE_OVERLAY_STAGE_A 0
 #endif
-#if GUIDE_OVERLAY_STAGE_A
-    if (cardiReadCardPatch)
+#ifndef EXIT_TO_LAUNCHER
+#define EXIT_TO_LAUNCHER 0
+#endif
+#if GUIDE_OVERLAY_STAGE_A || EXIT_TO_LAUNCHER
     {
-        GuideOverlay9Install(patchContext, cardiReadCardPatch->GetCardiReadCard(),
-            cardiReadCardPatch->IsThumb());
+        // sdk 2-4 games are hooked at CARDi_ReadCard; twl-sdk games have no
+        // such patch and are hooked at CARDi_ReadRomWithCPU instead, which is
+        // the same shape of function and reached just as often.
+        u32* cardEntry = nullptr;
+        bool cardThumb = false;
+        if (cardiReadCardPatch)
+        {
+            cardEntry = cardiReadCardPatch->GetCardiReadCard();
+            cardThumb = cardiReadCardPatch->IsThumb();
+        }
+        else if (cardiReadRomWithCpuPatch)
+        {
+            cardEntry = cardiReadRomWithCpuPatch->GetCardiReadRomWithCpu();
+            cardThumb = cardiReadRomWithCpuPatch->IsThumb();
+        }
+        GuideOverlay9Install(patchContext, cardEntry, cardThumb,
+            osResetSystemPatch ? osResetSystemPatch->GetRebootEntry() : 0);
     }
 #else
     (void)cardiReadCardPatch;
+    (void)cardiReadRomWithCpuPatch;
 #endif
 
     dc_flushAll();

@@ -126,6 +126,9 @@ void OSResetSystemPatch::ApplyPatch(PatchContext& patchContext)
 
     *(u32*)((u8*)_osResetSystem + offset) = 0xE51FF004;
     *(u32*)((u8*)_osResetSystem + offset + 4) = (u32)patchCode->GetOSResetSystemFunction();
+    // Same address the game's own OS_ResetSystem now falls into, published so
+    // a resident patch can reboot without the game asking for it.
+    _rebootEntry = (u32)patchCode->GetOSResetSystemFunction();
 
     _cheatsPointer = patchCodePart2->GetCheatsPointerAtTarget();
 }

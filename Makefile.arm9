@@ -51,6 +51,15 @@ endif
 ifeq ($(EXIT_DIAG),1)
 DEFINES		+= -DEXIT_TO_LAUNCHER=1 -DEXIT_DIAG=1
 endif
+# GUIDE_ARENA_PROOF=1 : phase 4 M1. Reserve 16KB at the top of the arm9 main
+#                       arena (lower OS_GetInitArenaHi), place the blob there,
+#                       detour the card entry into it as a pass-through, and
+#                       have the arm7 monitor tone every ~60 s: ~2 kHz = the
+#                       reservation is intact, ~250 Hz = the game wrote into it.
+#                       Every overlay switch above uses the reservation too.
+ifeq ($(GUIDE_ARENA_PROOF),1)
+DEFINES		+= -DGUIDE_ARENA_PROOF=1
+endif
 
 # Libraries
 # ---------

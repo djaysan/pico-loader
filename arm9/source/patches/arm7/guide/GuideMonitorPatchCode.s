@@ -73,6 +73,53 @@ diag_off:
 diag_done:
 #endif
 
+#if GUIDE_ARENA_PROOF
+    // Phase 4 M1 residency check. The loader reserved the top of the arm9 main
+    // arena, put the overlay blob at its start and filled the rest with a
+    // canary. Every ~60 s, sample one word per 32-byte arm9 cache line of that
+    // canary and play a 0.5 s tone on channel 11: ~2 kHz = still intact (the
+    // game respects the lowered arena high), ~250 Hz = the game wrote into it.
+    // Silence = nothing was placed on this game (no reservation found).
+    ldr r2, guidemonitor_reserveScanStart
+    cmp r2, #0
+    beq arena_done
+    adr r4, arena_state
+    ldr r0, [r4]
+    adds r0, #1
+    str r0, [r4]                    // vblanks since the last check
+    ldr r1, =3600                   // ~60 s
+    cmp r0, r1
+    bne arena_tone_end
+    ldr r3, guidemonitor_reserveEnd
+    ldr r1, =0xA55A3CC3             // GUIDE_RESERVE_CANARY in GuideOverlay9.h
+arena_scan:
+    ldr r0, [r2]
+    cmp r0, r1
+    bne arena_bad
+    adds r2, #32
+    cmp r2, r3
+    blo arena_scan
+    ldr r0, =0x0000FBE9             // SOUNDxTMR ~2 kHz: intact
+    b arena_tone
+arena_bad:
+    ldr r0, =0x0000DF46             // SOUNDxTMR ~250 Hz: overwritten
+arena_tone:
+    ldr r1, =0x040004B0             // SOUND11CNT
+    strh r0, [r1, #8]
+    ldr r0, =0xE340407F             // start | PSG | 50% duty | center | full vol
+    str r0, [r1]
+    b arena_done
+arena_tone_end:
+    ldr r1, =3630                   // tone lasts 30 vblanks
+    cmp r0, r1
+    blo arena_done
+    ldr r1, =0x040004B0
+    movs r2, #0
+    str r2, [r1]                    // channel 11 off
+    str r2, [r4]                    // start the next 60 s
+arena_done:
+#endif
+
     ldr r0, guidemonitor_guideInfoPtr
     cmp r0, #0
     beq monitor_end
@@ -155,6 +202,19 @@ diag_state:
 .global guidemonitor_guideDataPtr
 guidemonitor_guideDataPtr:
     .word 0 // baked: runtime address of the arm9 overlay guide_data
+#endif
+
+#if GUIDE_ARENA_PROOF
+arena_state:
+    .word 0 // vblanks since the last check
+
+.global guidemonitor_reserveScanStart
+guidemonitor_reserveScanStart:
+    .word 0 // baked: first canary word of the arm9 reservation, or 0
+
+.global guidemonitor_reserveEnd
+guidemonitor_reserveEnd:
+    .word 0 // baked: end of the arm9 reservation
 #endif
 
 .pool

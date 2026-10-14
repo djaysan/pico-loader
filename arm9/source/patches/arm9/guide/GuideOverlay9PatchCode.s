@@ -30,10 +30,10 @@
 // hook it by image patching (see PHASE3-FINDINGS.md). Instead:
 //
 //   Stage A (guide_tramp): the loader image-patches the entry of the card
-//     read function (CARDi_ReadCard, which the loader already locates) with a
-//     branch to guide_tramp. That runs during gameplay AFTER OS_Init has
-//     populated ITCM. It calls guide_installer once, replays the displaced
-//     first instruction, then continues the original function.
+//     read function (CARDi_ReadCard, which the loader already locates) with an
+//     absolute jump to guide_tramp. That runs during gameplay AFTER OS_Init has
+//     populated ITCM. It calls guide_installer once, replays the two displaced
+//     instructions, then continues the original function.
 //
 //   EXIT_TO_LAUNCHER (guide_exitCheck): Stage A on its own is already enough
 //     to leave a game. On every card read it samples the keys and, while
@@ -55,7 +55,9 @@
 //     game resumes exactly. When the combo is not held it chains straight
 //     through every frame. No VRAM/palette/SD/PMIC access.
 //
-// Whole blob is position independent (copied to reserved patch-heap memory).
+// Whole blob is position independent. It is copied to the top of the arm9 main
+// arena, which the loader reserves by lowering OS_GetInitArenaHi (phase 4 M1);
+// the 0x500 arm9 patch heap it used to share was reused by games at runtime.
 // All shared state lives in guide_data; code reaches it through the single
 // baked absolute pointer in guide_dataAddr_lit. Keep the GD_* offsets below
 // in sync with GuideOverlay9.h.
@@ -76,9 +78,11 @@
 .arm
 
 // ======================= Stage A: card-entry trampoline =======================
-// Entered via `b guide_tramp` written over the card function's first
-// instruction. r0-r3 hold the card args, lr the game caller. Preserve
-// everything; run the installer once; replay the displaced instruction; go.
+// Entered via `ldr pc,[pc,#-4]` + this address, written over the card
+// function's first two instructions. An absolute jump, so it stays right when
+// the card function sits in an autoload block that is copied elsewhere before
+// main(). r0-r3 hold the card args, lr the game caller. Preserve everything;
+// run the installer once; replay the two displaced instructions; go.
 .global guide_tramp
 .type guide_tramp, %function
 guide_tramp:
@@ -92,13 +96,19 @@ guide_tramp:
     ldmfd sp!, {r0-r3, r12, lr}
 .global guide_replay_slot
 guide_replay_slot:
-    nop                              // C bakes the displaced card instruction here
-    ldr   pc, guide_cardReturn_lit   // -> card function + 4
+    nop                              // C bakes displaced instruction 0 (the stmfd)
+.global guide_replay_slot1
+guide_replay_slot1:
+    nop                              // C bakes displaced instruction 1, or `ldr rX, guide_replay_lit`
+    ldr   pc, guide_cardReturn_lit   // -> card function + 8
 
 .balign 4
 .global guide_cardReturn_lit
 guide_cardReturn_lit:
-    .word 0                          // C bakes: card entry + 4
+    .word 0                          // C bakes: runtime card entry + 8
+.global guide_replay_lit
+guide_replay_lit:
+    .word 0                          // C bakes: what instruction 1's pc-relative ldr loads
 .global guide_dataAddr_lit
 guide_dataAddr_lit:
     .word 0                          // C bakes: absolute address of guide_data
@@ -301,10 +311,7 @@ ov_black:
 #if GUIDE_OVERLAY_STAGE_B
 // ======================= shared state (guide_data) =======================
 // Layout must match the GD_* equ  offsets above and GuideOverlay9.h.
-// Only Stage B and the arm7 diagnostic read it, so an exit-only build leaves
-// it out entirely - the arm9 patch heap is 0x500 bytes shared with every other
-// patch, and 48 bytes of state nothing reads is 48 bytes that could be the
-// difference between the blob fitting and not.
+// Only Stage B and the arm7 diagnostic read it, so other builds leave it out.
 .balign 4
 .global guide_data
 guide_data:

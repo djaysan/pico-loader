@@ -25,7 +25,9 @@ extern "C" void overlay_stub(void);
 extern "C" u8 guide_data[];
 
 // Literal slots baked in before the blob is copied to its resident location.
-extern "C" u32 guide_replay_slot;      // the displaced card instruction to replay
-extern "C" u32 guide_cardReturn_lit;   // card entry + 4
+extern "C" u32 guide_replay_slot;      // displaced card instruction 0 to replay
+extern "C" u32 guide_replay_slot1;     // displaced card instruction 1 to replay
+extern "C" u32 guide_replay_lit;       // value instruction 1's pc-relative ldr loads
+extern "C" u32 guide_cardReturn_lit;   // runtime card entry + 8
 extern "C" u32 guide_dataAddr_lit;     // absolute runtime address of guide_data
 extern "C" u32 guide_rebootEntry_lit;  // patched OS_ResetSystem tail, or 0

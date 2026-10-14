@@ -75,6 +75,11 @@ void CheatEnginePatch::ApplyPatch(PatchContext& patchContext)
         // observe GD_FRAMECOUNT / GD_MARKER and blip when the overlay fires.
         guidemonitor_guideDataPtr = gGuideOverlayDataAddr;
 #endif
+#if GUIDE_ARENA_PROOF
+        // And the canary part of the arm9 reservation for the residency check.
+        guidemonitor_reserveScanStart = gGuideReserveScanStart;
+        guidemonitor_reserveEnd = gGuideReserveEnd;
+#endif
         memcpy(_guideMonitorTarget, SECTION_START(patch_guidemonitor), SECTION_SIZE(patch_guidemonitor));
         u32 targetDelta = (u32)_guideMonitorTarget - (u32)SECTION_START(patch_guidemonitor);
         hookTarget = (const void*)((u32)guidemonitor_entry + targetDelta);

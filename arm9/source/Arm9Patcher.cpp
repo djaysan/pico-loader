@@ -12,6 +12,7 @@
 #include "patches/arm9/sdk5/CardiReadRomWithCpuPatch.h"
 #include "patches/arm9/CardiReadRomIdCorePatch.h"
 #include "patches/arm9/OSResetSystemPatch.h"
+#include "patches/arm9/OsGetInitArenaHiPatch.h"
 #include "patches/arm9/PokemonDownloaderArm9Patch.h"
 #include "patches/arm9/DSProtectArm9Patch.h"
 #include "patches/arm9/LastWindowCrcPatch.h"
@@ -40,6 +41,17 @@
 #define PARENT_SECTION_END      0x02003000
 
 #define REQUIRED_PATCH_HEAP_SPACE   0x500
+
+#ifndef GUIDE_OVERLAY_STAGE_A
+#define GUIDE_OVERLAY_STAGE_A 0
+#endif
+#ifndef EXIT_TO_LAUNCHER
+#define EXIT_TO_LAUNCHER 0
+#endif
+#ifndef GUIDE_ARENA_PROOF
+#define GUIDE_ARENA_PROOF 0
+#endif
+#define GUIDE_OVERLAY_ANY (GUIDE_OVERLAY_STAGE_A || EXIT_TO_LAUNCHER || GUIDE_ARENA_PROOF)
 
 typedef void (*uncompress_func_t)(void* compressedEnd);
 
@@ -165,6 +177,8 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     OSResetSystemPatch* osResetSystemPatch = nullptr;
     CardiReadCardPatch* cardiReadCardPatch = nullptr;
     CardiReadRomWithCpuPatch* cardiReadRomWithCpuPatch = nullptr;
+    u32 guideReserveBase = 0;
+    u32 guideReserveEnd = 0;
     if (sdkVersion != 0)
     {
         // The arm9 per-frame handler (OS irq dispatcher) is built at runtime
@@ -230,6 +244,27 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
         patchCollection.AddPatch(osResetSystemPatch);
         AddGamePatches(patchCollection, romHeader->gameCode, apListEntry);
 
+#if GUIDE_OVERLAY_ANY
+        // Reserve the top of the arm9 main arena for the guide overlay blob by
+        // lowering OS_GetInitArenaHi(OS_ARENA_MAIN), the arm9 counterpart of the
+        // arm7 OsGetInitArenaLoPatch. The game heap then never reaches it - the
+        // 0x500 patch heap the blob used before was reused by games at runtime
+        // (PHASE4-PLAN.md). DSi mode is skipped: a twl game's arena comes from
+        // the arm9i there, not from this ntr literal.
+        if (!runInDSiMode)
+        {
+            auto arenaHiPatch = new OsGetInitArenaHiPatch();
+            arenaHiPatch->FindPatchTarget(patchContext);
+            if (arenaHiPatch->IsFound())
+            {
+                guideReserveEnd = (u32)arenaHiPatch->GetMainMemoryArenaHi();
+                guideReserveBase = guideReserveEnd - GUIDE_RESERVE_SIZE;
+                arenaHiPatch->SetMainMemoryArenaHi((void*)guideReserveBase);
+                patchCollection.AddPatch(arenaHiPatch);
+            }
+        }
+#endif
+
         if (moduleParams && compressedEnd != 0)
         {
             AddRestoreCompressedEndPatch(
@@ -244,26 +279,15 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
         ErrorDisplay().PrintError("Failed to apply arm9 patches.");
     }
 
-    // Phase-3 guide overlay Stage A: image-patch the card read entry the
-    // loader located above to bootstrap the runtime ITCM dispatcher hook
+    // Guide overlay Stage A: place the resident blob in the reservation made
+    // above and image-patch the card read entry the loader located with an
+    // absolute jump into it, to bootstrap the runtime ITCM dispatcher hook
     // (Stage B). The Stage B mechanism + overlay (freeze/blank/resume) are
-    // GDB-verified in melonDS (see PHASE3-PROGRESS.md). Stage A cannot be
-    // delivered in melonDS: a residency probe proved that NONE of the loader's
-    // arm9 memory writes survive to gameplay there (6/6 stamped locations gone,
-    // incl. one overwritten by fresh game code) - melonDS runs the game from a
-    // fresh arm9 and discards the whole loader-patched image, so the loader's
-    // own card/OSReset patches do not survive either (card reads work via
-    // melonDS's native cart handling). On hardware DSpico's arm9 patches must
-    // persist, so Stage A likely works there - untested. Disabled by default so
-    // a build from HEAD is the safe beep-only loader; set GUIDE_OVERLAY_STAGE_A
-    // to 1 only for a supervised hardware experiment.
-#ifndef GUIDE_OVERLAY_STAGE_A
-#define GUIDE_OVERLAY_STAGE_A 0
-#endif
-#ifndef EXIT_TO_LAUNCHER
-#define EXIT_TO_LAUNCHER 0
-#endif
-#if GUIDE_OVERLAY_STAGE_A || EXIT_TO_LAUNCHER
+    // GDB-verified in melonDS (see PHASE3-PROGRESS.md). None of this can be
+    // tested in melonDS: it runs the game from a fresh arm9 and discards the
+    // whole loader-patched image (PHASE3-FINDINGS.md), so it is hardware-only.
+    // Disabled by default so a build from HEAD is the safe beep-only loader.
+#if GUIDE_OVERLAY_ANY
     {
         // sdk 2-4 games are hooked at CARDi_ReadCard; twl-sdk games have no
         // such patch and are hooked at CARDi_ReadRomWithCPU instead, which is
@@ -280,12 +304,14 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
             cardEntry = cardiReadRomWithCpuPatch->GetCardiReadRomWithCpu();
             cardThumb = cardiReadRomWithCpuPatch->IsThumb();
         }
-        GuideOverlay9Install(patchContext, cardEntry, cardThumb,
+        GuideOverlay9Install(patchContext, guideReserveBase, guideReserveEnd, cardEntry, cardThumb,
             osResetSystemPatch ? osResetSystemPatch->GetRebootEntry() : 0);
     }
 #else
     (void)cardiReadCardPatch;
     (void)cardiReadRomWithCpuPatch;
+    (void)guideReserveBase;
+    (void)guideReserveEnd;
 #endif
 
     dc_flushAll();

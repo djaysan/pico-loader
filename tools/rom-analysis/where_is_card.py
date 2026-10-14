@@ -68,7 +68,7 @@ for path in sys.argv[1:]:
 
     # walk the list: each entry describes one block, laid out consecutively
     # in the image starting at autoloadStart
-    ent = 16 if twl else 12
+    ent = 12  # 3-word entries on twl too: Okamiden's crt0 reads target, size, bss
     ls = mp['autoloadListStart'] - h['load']
     le = mp['autoloadListEnd'] - h['load']
     src = mp['autoloadStart']

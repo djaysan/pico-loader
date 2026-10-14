@@ -103,20 +103,16 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
                 }
             }
 
-            if (sdkVersion.IsTwlSdk())
-            {
-                arm9Autoload = std::make_unique<AutoloadAdjuster<autoload_list_entry_sdk5_t>>(
-                    (autoload_list_entry_sdk5_t*)moduleParams->autoloadListStart,
-                    (autoload_list_entry_sdk5_t*)moduleParams->autoloadListEnd,
-                    moduleParams->autoloadStart);
-            }
-            else
-            {
-                arm9Autoload = std::make_unique<AutoloadAdjuster<autoload_list_entry_t>>(
-                    (autoload_list_entry_t*)moduleParams->autoloadListStart,
-                    (autoload_list_entry_t*)moduleParams->autoloadListEnd,
-                    moduleParams->autoloadStart);
-            }
+            // The ntr arm9 autoload list has 3-word entries on every sdk, twl
+            // included: Okamiden's (sdk 5) crt0 reads target, size, bss per
+            // entry and its list is 24 bytes for 2 blocks. Only the twl-only
+            // ltd lists (arm9i/arm7i) carry the 4-word sdk5 entry. Parsing it
+            // as sdk5 never reaches the list end (`curr != end`) and walks
+            // into whatever follows the image.
+            arm9Autoload = std::make_unique<AutoloadAdjuster<autoload_list_entry_t>>(
+                (autoload_list_entry_t*)moduleParams->autoloadListStart,
+                (autoload_list_entry_t*)moduleParams->autoloadListEnd,
+                moduleParams->autoloadStart);
 
             if (runInDSiMode)
             {

@@ -22,6 +22,12 @@
 #ifndef EXIT_DIAG
 #define EXIT_DIAG 0
 #endif
+// GUIDE_IPC_FREEZE=1 (phase 4 M2): the trampoline installs guide_ipcHandler in
+// the game's irqTable[16] (IPC_SYNC). The arm7 guide monitor sends sync value 9
+// on L+R+Select and the handler freezes with both screens black until release.
+#ifndef GUIDE_IPC_FREEZE
+#define GUIDE_IPC_FREEZE 0
+#endif
 
 // In-game guide overlay, phase 3 milestone 1: two-stage runtime bootstrap.
 //
@@ -93,6 +99,9 @@ guide_tramp:
 #if GUIDE_OVERLAY_STAGE_B
     bl    guide_installer
 #endif
+#if GUIDE_IPC_FREEZE
+    bl    guide_ipcInstall
+#endif
     ldmfd sp!, {r0-r3, r12, lr}
 .global guide_replay_slot
 guide_replay_slot:
@@ -162,6 +171,85 @@ ex_regIme:
     .word 0x04000208
 ex_regDma0Cnt:
     .word 0x040000B8
+#endif
+
+#if GUIDE_IPC_FREEZE
+// ======================= M2: IPC_SYNC hook installer =======================
+// Runs on every card read (from guide_tramp, which saved r0-r3, r12, lr). Puts
+// guide_ipcHandler in irqTable[16], keeping the game's own entry as the chain
+// target, and enables the IPC_SYNC irq. The game may rewrite the table or IE
+// at any time, so this re-asserts on every call (as nds-bootstrap does).
+// ponytail: re-asserted on card reads only; a game that clears IE bit 16 and
+// then stops reading the card ignores the combo until its next read. Hook
+// OS_EnableIrqMask like nds-bootstrap if a lap shows that.
+.type guide_ipcInstall, %function
+guide_ipcInstall:
+    ldr   r0, guide_irqTable_lit
+    cmp   r0, #0
+    bxeq  lr                         // no table found on this game
+    adr   r2, guide_ipcHandler
+    ldr   r1, [r0, #16 * 4]          // irqTable[16] (IPC_SYNC)
+    cmp   r1, r2
+    strne r1, ipc_orig               // chain target first: an irq can land between the stores
+    strne r2, [r0, #16 * 4]
+
+    mov   r3, #0x04000000
+    ldr   r12, [r3, #0x208]          // REG_IME
+    mov   r0, #0
+    str   r0, [r3, #0x208]           // no irq during the read-modify-writes
+    ldr   r0, [r3, #0x210]           // REG_IE
+    orr   r0, r0, #0x10000           // IRQ_IPC_SYNC
+    str   r0, [r3, #0x210]
+    add   r1, r3, #0x180             // REG_IPCSYNC
+    ldrh  r0, [r1]
+    orr   r0, r0, #0x4000            // irq from the arm7 enabled (send bit 13 reads 0)
+    strh  r0, [r1]
+    str   r12, [r3, #0x208]          // REG_IME back
+    bx    lr
+
+// ======================= M2: IPC_SYNC handler =======================
+// irqTable[16] entry. The game's dispatcher has already acknowledged IF and
+// calls this like any irq handler: irq mode, irqs off, r0-r3 and r12 free,
+// return with bx lr. On sync value 9 (the arm7 monitor saw L+R+Select) it is
+// the phase 3 freeze: both MASTER_BRIGHT to black, spin while the combo is
+// held, restore exactly. Then the game's own entry runs, lr intact.
+.type guide_ipcHandler, %function
+guide_ipcHandler:
+    mov   r12, #0x04000000
+    add   r0, r12, #0x180
+    ldrh  r0, [r0]                   // REG_IPCSYNC, bits 0-3 = the arm7's value
+    and   r0, r0, #0xF
+    cmp   r0, #9
+    bne   ih_chain
+    stmfd sp!, {r4, r5}
+    add   r1, r12, #0x130            // REG_KEYINPUT
+    add   r2, r12, #0x6C             // MASTER_BRIGHT engine A
+    add   r3, r2, #0x1000            // MASTER_BRIGHT engine B
+    ldrh  r4, [r2]                   // save A
+    ldrh  r5, [r3]                   // save B
+    mov   r0, #0x8000
+    orr   r0, r0, #0x10              // 0x8010 = brightness down by 16 (black)
+    strh  r0, [r2]
+    strh  r0, [r3]
+ih_spin:
+    ldrh  r0, [r1]
+    tst   r0, #0x304                 // L | R | Select, active low
+    beq   ih_spin                    // all three still held -> stay frozen
+    strh  r4, [r2]                   // release: restore exactly
+    strh  r5, [r3]
+    ldmfd sp!, {r4, r5}
+ih_chain:
+    ldr   r0, ipc_orig
+    cmp   r0, #0
+    bxeq  lr                         // the game had no entry there
+    bx    r0                         // the game's own entry; it returns to the dispatcher
+
+.balign 4
+.global guide_irqTable_lit
+guide_irqTable_lit:
+    .word 0                          // C bakes: the game's OS_IRQTable, or 0
+ipc_orig:
+    .word 0                          // runtime: the game's own irqTable[16] entry
 #endif
 
 #if GUIDE_OVERLAY_STAGE_B

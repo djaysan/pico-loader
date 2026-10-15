@@ -60,6 +60,15 @@ endif
 ifeq ($(GUIDE_ARENA_PROOF),1)
 DEFINES		+= -DGUIDE_ARENA_PROOF=1
 endif
+# GUIDE_IPC_FREEZE=1 : phase 4 M2. M1's reservation and card detour, plus an
+#                      IPC_SYNC hook: the detour writes a handler into the
+#                      game's irqTable[16], the arm7 monitor sends sync value 9
+#                      on L+R+Select, and the handler blacks both screens until
+#                      release. Only on games with a guide file (the arm7
+#                      monitor needs one).
+ifeq ($(GUIDE_IPC_FREEZE),1)
+DEFINES		+= -DGUIDE_IPC_FREEZE=1
+endif
 
 # Libraries
 # ---------

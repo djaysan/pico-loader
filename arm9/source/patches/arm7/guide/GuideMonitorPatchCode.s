@@ -10,7 +10,8 @@
 //
 // While L+R+Select is held and a guide cluster map was published, plays a
 // PSG beep on sound channel 13 (audible on melonDS and hardware). Sound
-// state is restored on release.
+// state is restored on release. With GUIDE_IPC_FREEZE the press also sends
+// IPC sync value 9 to the arm9 (its overlay freezes until release).
 //
 // No PMIC access: the PMIC shares the SPI bus with the touchscreen, and a
 // read-modify-write raced by the game's touch traffic can write back a
@@ -144,6 +145,17 @@ arena_done:
     ldr r2, [r4, #4]
     ldr r1, =0x04000500 // REG_SOUNDCNT
     strh r2, [r1]
+#if GUIDE_IPC_FREEZE
+    // put our IPC sync output back as it was, no irq: the game's own reset
+    // handshake reads it
+    ldr r1, =0x04000180 // REG_IPCSYNC
+    ldrh r0, [r1]
+    ldr r2, =0x0F00
+    bics r0, r2
+    ldr r2, [r4, #8]
+    orrs r0, r2
+    strh r0, [r1]
+#endif
     b monitor_end
 
 combo_held:
@@ -169,6 +181,18 @@ combo_held:
     strh r0, [r1, #8] // SOUNDxTMR
     ldr r0, =0xE340407F // start | PSG | 50% duty | center pan | full volume
     str r0, [r1]
+#if GUIDE_IPC_FREEZE
+    // ask the arm9 to freeze (guide_ipcHandler): sync value 9 + irq request
+    ldr r1, =0x04000180 // REG_IPCSYNC
+    ldrh r0, [r1]
+    ldr r2, =0x0F00
+    ands r2, r0 // our current output value
+    str r2, [r4, #8] // restored on release
+    bics r0, r2
+    ldr r2, =0x2900 // output 9 | send irq to the arm9
+    orrs r0, r2
+    strh r0, [r1]
+#endif
 
 monitor_end:
     pop {r4}
@@ -185,6 +209,9 @@ no_chain:
 monitor_state:
     .word 0 // combo held flag
     .word 0 // saved REG_SOUNDCNT
+#if GUIDE_IPC_FREEZE
+    .word 0 // saved IPC sync output (bits 8-11)
+#endif
 
 .global guidemonitor_guideInfoPtr
 guidemonitor_guideInfoPtr:

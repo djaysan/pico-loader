@@ -10,6 +10,9 @@
 #ifndef GUIDE_OVERLAY_STAGE_B
 #define GUIDE_OVERLAY_STAGE_B GUIDE_OVERLAY_STAGE_A
 #endif
+#ifndef GUIDE_IPC_FREEZE
+#define GUIDE_IPC_FREEZE 0
+#endif
 
 // Published for the arm7 monitor pass (see GuideOverlay9.h).
 u32 gGuideOverlayDataAddr = 0;
@@ -48,6 +51,38 @@ static u32 RelocateCardInstruction1(const u32* cardiReadCard)
     return 0;
 }
 
+#if GUIDE_IPC_FREEZE
+// The game's arm9 irq dispatcher runs from itcm, but its code is in the itcm
+// autoload data of the image, so the table it reads is found here at patch time
+// (same search as tools/rom-analysis/find_table.py).
+// Classic tail: ldr r1,=table ; ldr r0,[r1,r0,lsl#2] ; ldr lr,=ret ; bx r0 ; .word table
+static const u32 sIrqDispatchTail[] = { 0xE59F1008u, 0xE7910100u, 0xE59FE004u, 0xE12FFF10u };
+// Twl sdk 5 head (Golden Sun: Dark Dawn): mov r12,#0x04000000 ; ldr r2,[r12,#0x208]! ;
+// ldrd r0,[r12,#8]! ; cmp r2,#0
+static const u32 sIrqDispatchHeadSdk5[] = { 0xE3A0C301u, 0xE5BC2208u, 0xE1EC00D8u, 0xE3520000u };
+
+// Returns the address of OS_IRQTable, or 0.
+static u32 FindIrqTable(PatchContext& patchContext)
+{
+    u32 table = 0;
+    u32* match = patchContext.FindPattern32(sIrqDispatchTail, sizeof(sIrqDispatchTail));
+    if (match)
+    {
+        table = match[4];
+    }
+    else if ((match = patchContext.FindPattern32(sIrqDispatchHeadSdk5, sizeof(sIrqDispatchHeadSdk5))) != nullptr
+        && (match[6] & 0xFFFFF000u) == 0x159FE000u // ldrne lr, [pc, #imm]  (the table end)
+        && match[10] == 0x171EE100u)               // ldrne lr, [lr, -r0, lsl #2] with r0 = clz
+    {
+        // Indexed down from the literal by clz(bit) = 31 - bit, so it points at table[31].
+        table = *(const u32*)((const u8*)&match[6] + 8 + (match[6] & 0xFFF)) - 31 * 4;
+    }
+    // OS_IRQTable is in dtcm (0x027C0000 or 0x027E0000 in every local rom). A write
+    // anywhere else would land in game memory, so refuse it.
+    return (table >= 0x027C0000u && table < 0x02800000u) ? table : 0;
+}
+#endif
+
 void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reserveEnd,
     u32* cardiReadCard, bool cardThumb, u32 rebootEntry)
 {
@@ -76,6 +111,11 @@ void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reser
         // Resume where the card function really runs: an autoload block is
         // copied to its target before main(), so the image address is wrong there.
         guide_cardReturn_lit = patchContext.GetAutoloadAdjuster()->AdjustInitialToFinal((u32)cardiReadCard) + 8;
+#if GUIDE_IPC_FREEZE
+        // The irq hook is installed from the detour, so only look when there is one.
+        guide_irqTable_lit = FindIrqTable(patchContext);
+        LOG_DEBUG("Guide overlay: irq table 0x%08X\n", guide_irqTable_lit);
+#endif
     }
     guide_rebootEntry_lit = rebootEntry;             // thumb bit already set, or 0
 #if GUIDE_OVERLAY_STAGE_B

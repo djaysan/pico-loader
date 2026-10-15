@@ -42,9 +42,6 @@
 
 #define REQUIRED_PATCH_HEAP_SPACE   0x500
 
-#ifndef GUIDE_OVERLAY_STAGE_A
-#define GUIDE_OVERLAY_STAGE_A 0
-#endif
 #ifndef EXIT_TO_LAUNCHER
 #define EXIT_TO_LAUNCHER 0
 #endif
@@ -54,7 +51,7 @@
 #ifndef GUIDE_IPC_FREEZE
 #define GUIDE_IPC_FREEZE 0
 #endif
-#define GUIDE_OVERLAY_ANY (GUIDE_OVERLAY_STAGE_A || EXIT_TO_LAUNCHER || GUIDE_ARENA_PROOF || GUIDE_IPC_FREEZE)
+#define GUIDE_OVERLAY_ANY (EXIT_TO_LAUNCHER || GUIDE_ARENA_PROOF || GUIDE_IPC_FREEZE)
 
 typedef void (*uncompress_func_t)(void* compressedEnd);
 
@@ -184,13 +181,6 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
     u32 guideReserveEnd = 0;
     if (sdkVersion != 0)
     {
-        // The arm9 per-frame handler (OS irq dispatcher) is built at runtime
-        // inside ITCM and is not present in the rom image, so it cannot be
-        // hooked by image patching (see PHASE3-FINDINGS.md). The guide overlay
-        // instead bootstraps at runtime: the card read entry (located below)
-        // is detoured to a resident installer that hooks the ITCM dispatcher
-        // once it exists. Installed after the patch pass (GuideOverlay9Install).
-
         if (*(vu32*)0x02FFF00C == GAMECODE("ADAJ") &&
             romHeader->arm9LoadAddress == 0x02004000 &&
             romHeader->arm9EntryAddress == 0x02004800)
@@ -282,14 +272,12 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
         ErrorDisplay().PrintError("Failed to apply arm9 patches.");
     }
 
-    // Guide overlay Stage A: place the resident blob in the reservation made
-    // above and image-patch the card read entry the loader located with an
-    // absolute jump into it, to bootstrap the runtime ITCM dispatcher hook
-    // (Stage B). The Stage B mechanism + overlay (freeze/blank/resume) are
-    // GDB-verified in melonDS (see PHASE3-PROGRESS.md). None of this can be
-    // tested in melonDS: it runs the game from a fresh arm9 and discards the
-    // whole loader-patched image (PHASE3-FINDINGS.md), so it is hardware-only.
-    // Disabled by default so a build from HEAD is the safe beep-only loader.
+    // Guide overlay: place the resident blob in the reservation made above and
+    // image-patch the card read entry the loader located with an absolute jump
+    // into it (see GuideOverlay9.h). None of this can be tested in melonDS: it
+    // runs the game from a fresh arm9 and discards the whole loader-patched
+    // image (PHASE3-FINDINGS.md), so it is hardware-only. Disabled by default so
+    // a build from HEAD is the safe beep-only loader.
 #if GUIDE_OVERLAY_ANY
     {
         // sdk 2-4 games are hooked at CARDi_ReadCard; twl-sdk games have no

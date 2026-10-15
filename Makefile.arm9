@@ -26,28 +26,15 @@ PLATFORM	?= DSPICO
 
 DEFINES		:= -DLIBTWL_ARM9 -DARM9 -DPICO_LOADER_TARGET_$(PLATFORM)
 
-# Phase-3 guide overlay build switches (default off = safe beep-only loader).
-# GUIDE_OVERLAY_STAGE_A=1 : install the runtime ITCM dispatcher hook + arm7
-#                           diagnostic blip (hardware Stage-A test).
-# GUIDE_OVERLAY_FREEZE=1  : make the overlay freeze/blank on L+R+Select instead
-#                           of the safe no-freeze diagnostic (implies STAGE_A).
-ifeq ($(GUIDE_OVERLAY_STAGE_A),1)
-DEFINES		+= -DGUIDE_OVERLAY_STAGE_A=1
-endif
-ifeq ($(GUIDE_OVERLAY_FREEZE),1)
-DEFINES		+= -DGUIDE_OVERLAY_STAGE_A=1 -DGUIDE_OVERLAY_FREEZE=1
-endif
-
-# EXIT_TO_LAUNCHER=1 : leave a running game with L+R+Start+Select. Uses the
-#                     Stage-A resident blob only - no ITCM write, no per-frame
-#                     hook - so it is also the cheapest hardware proof that
-#                     Stage A residency works. Independent of STAGE_A/FREEZE.
+# Guide overlay build switches (default off = safe beep-only loader).
+# EXIT_TO_LAUNCHER=1 : leave a running game with L+R+Start+Select, checked by
+#                     the resident blob on every card read.
 ifeq ($(EXIT_TO_LAUNCHER),1)
 DEFINES		+= -DEXIT_TO_LAUNCHER=1
 endif
-# EXIT_DIAG=1 : install the detour but never run the key check. Same blob, same
-#               heap allocation, pass-through trampoline - isolates "does the
-#               Stage-A trampoline work at all" from the exit code itself.
+# EXIT_DIAG=1 : install the detour but never run the key check. Same blob,
+#               pass-through trampoline - isolates "does the trampoline work
+#               at all" from the exit code itself.
 ifeq ($(EXIT_DIAG),1)
 DEFINES		+= -DEXIT_TO_LAUNCHER=1 -DEXIT_DIAG=1
 endif

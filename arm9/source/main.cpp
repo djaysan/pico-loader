@@ -166,9 +166,6 @@ static void handleApplyArm7PatchesCommand(u32 cheatsLength, u32 guideInfoLength)
     void* guideInfo = nullptr;
     void* patchSpaceStart = Arm7Patcher().ApplyPatches(sLoaderPlatform, cheatsLength, cheats,
         guideInfoLength, guideInfo, sRunInDSiMode);
-    // NOTE: arm9 guide overlay install disabled; the arm9 per-frame handler
-    // is runtime-built in ITCM and not hookable via image patching. The arm7
-    // guide monitor (beep) still runs. See PHASE3-FINDINGS.md.
     if (sSoftResetCheatsPointer != nullptr)
     {
         *sSoftResetCheatsPointer = cheats;

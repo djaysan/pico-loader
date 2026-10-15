@@ -10,15 +10,14 @@
 ///        Also hardcoded in GuideMonitorPatchCode.s - keep in sync.
 #define GUIDE_RESERVE_CANARY    0xA55A3CC3u
 
-/// @brief Installs the phase-3 two-stage guide overlay bootstrap.
+/// @brief Installs the guide overlay's resident arm9 blob.
 ///
-/// The arm9 per-frame IRQ dispatcher is built at runtime in ITCM and is not
-/// present in the rom image, so it cannot be hooked at patch time. Instead
-/// this places a resident blob at the start of the reservation and image-patches
-/// the entry of the card read function (already located by the loader) with an
-/// absolute jump into it. At runtime the blob's installer scans ITCM for the
-/// dispatcher and detours it into the per-frame overlay stub (freeze + blank +
-/// resume). See PHASE3-FINDINGS.md, PHASE4-PLAN.md and GuideOverlay9PatchCode.s.
+/// Places the blob at the start of the reservation and image-patches the entry
+/// of the card read function (already located by the loader) with an absolute
+/// jump into it, so the blob runs on every card read during gameplay. With
+/// GUIDE_IPC_FREEZE that is where it installs its IPC_SYNC irq handler in the
+/// game's irq table (found here at patch time). See PHASE4-PLAN.md and
+/// GuideOverlay9PatchCode.s.
 ///
 /// @param patchContext  The arm9 patch context (for the autoload adjuster).
 /// @param reserveBase   Start of the reserved main memory, or 0 to skip (no
@@ -35,14 +34,9 @@
 void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reserveEnd,
     u32* cardiReadCard, bool cardThumb, u32 rebootEntry);
 
-/// @brief Runtime address of the overlay's guide_data block, published by
-///        GuideOverlay9Install so the (later) arm7 monitor pass can bake it in
-///        and observe GD_FRAMECOUNT / GD_MARKER from shared main memory. 0 when
-///        the overlay was not installed. Both patch passes run on the arm9
-///        loader in sequence, so this static carries across them.
-extern "C" u32 gGuideOverlayDataAddr;
-
-/// @brief The canary part of the reservation, [start, end), published the same
-///        way for the arm7 residency check. Both 0 when nothing was placed.
+/// @brief The canary part of the reservation, [start, end), published by
+///        GuideOverlay9Install for the arm7 residency check, which the later
+///        arm7 patch pass bakes in (both passes run on the arm9 loader in
+///        sequence). Both 0 when nothing was placed.
 extern "C" u32 gGuideReserveScanStart;
 extern "C" u32 gGuideReserveEnd;

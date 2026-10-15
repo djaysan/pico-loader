@@ -70,13 +70,9 @@ void CheatEnginePatch::ApplyPatch(PatchContext& patchContext)
         // patch heap) and chains to the cheat engine when cheats are active.
         guidemonitor_guideInfoPtr = _guideInfo;
         guidemonitor_chainPtr = hookTarget;
-#if GUIDE_OVERLAY_STAGE_A
-        // Hand the arm7 monitor the arm9 overlay's guide_data address so it can
-        // observe GD_FRAMECOUNT / GD_MARKER and blip when the overlay fires.
-        guidemonitor_guideDataPtr = gGuideOverlayDataAddr;
-#endif
 #if GUIDE_ARENA_PROOF
-        // And the canary part of the arm9 reservation for the residency check.
+        // Hand the arm7 monitor the canary part of the arm9 reservation for the
+        // residency check.
         guidemonitor_reserveScanStart = gGuideReserveScanStart;
         guidemonitor_reserveEnd = gGuideReserveEnd;
 #endif

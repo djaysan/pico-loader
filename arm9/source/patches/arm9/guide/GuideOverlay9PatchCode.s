@@ -49,6 +49,7 @@
 .equ W_SPSAVE,   24       // the game's irq sp while the reader runs
 .equ W_VRAMC,    28       // saved VRAMCNT_C (byte)
 .equ W_VRAMH,    29       // saved VRAMCNT_H (byte)
+.equ W_PAL17,    30       // saved sub bg palette entry 17 (the legend's grey)
 .equ W_DISPCNT,  32       // saved DISPCNT_B
 .equ W_POWCNT,   36       // saved halfwords from here on
 .equ W_BGCNT,    38
@@ -78,7 +79,7 @@
 .equ G_POSSECTOR, 132     // first sd sector of <guide>.pos, 0 = none
 .equ GUIDE_POS_SIZE, 32   // bytes of <guide>.pos (fileInfo.h)
 
-.equ ROWS, 24             // screen lines
+.equ ROWS, 23             // guide lines; the 24th screen line is the legend
 .equ COLS, 32             // characters per line
 #endif
 
@@ -359,6 +360,7 @@ guide_reader:
     ldr   r0, =0x10000
     str   r0, [r1]
 #endif
+    bl    rd_legend
     bl    rd_render
     ldr   r0, [r7, #W_BGN]           // show it: mode 0, only the borrowed bg
     ldr   r1, =0x100
@@ -380,6 +382,31 @@ rd_diag:
     strh  r0, [r1]
     bx    lr
 #endif
+
+// The last screen line: which buttons do what, in grey (palette bank 1).
+.thumb_func
+rd_legend:
+    push  {r4, lr}
+    ldr   r1, 9f
+8:  add   r1, pc                     // r1 = rd_legend_text
+    ldr   r0, =0x06207800 + ROWS * COLS * 2
+    movs  r2, #COLS
+    movs  r4, #1
+    lsls  r4, #12
+1:  ldrb  r3, [r1]
+    adds  r1, #1
+    subs  r3, #0x20
+    orrs  r3, r4
+    strh  r3, [r0]
+    adds  r0, #2
+    subs  r2, #1
+    bne   1b
+    pop   {r4, pc}
+.balign 4
+9:  .word rd_legend_text - (8b + 4)
+rd_legend_text:
+    .ascii "L/R page  Up/Dn line  B close   " // exactly COLS characters
+.pool
 
 // Save everything the reader touches on the sub engine and set it up for text.
 // Nothing in the main engine changes: the top screen keeps the frozen game.
@@ -457,6 +484,10 @@ rd_open:
     strh  r0, [r7, #W_PAL1]
     ldr   r0, =0x7FFF0000
     str   r0, [r6]
+    ldrh  r0, [r6, #0x22]            // and 17, the legend text (palette bank 1): grey
+    strh  r0, [r7, #W_PAL17]
+    ldr   r0, =0x5294
+    strh  r0, [r6, #0x22]
 
     // Back up the game's tiles and map rows the reader overwrites.
     ldr   r0, =W_BAKTILES
@@ -516,6 +547,8 @@ rd_close:
     strh  r1, [r0]
     ldrh  r1, [r7, #W_PAL1]
     strh  r1, [r0, #2]
+    ldrh  r1, [r7, #W_PAL17]
+    strh  r1, [r0, #0x22]
     ldr   r5, =0x04001000
     ldr   r0, [r7, #W_DISPCNT]
     str   r0, [r5]
@@ -552,13 +585,17 @@ rd_copy32:
     bx    lr
 .pool
 
-// Key loop. Up/Down = one line, Left/Right = one page, held d-pad repeats.
-// B, or L+R+Select again, closes.
+// Key loop. Up/Down = one line, L/R or Left/Right = one page, held keys
+// repeat. B closes (the legend on the last line says so).
 .thumb_func
 rd_loop:
     push  {r4-r6, lr}
-    bl    rd_keys
-    str   r0, [r7, #W_PREVKEYS]      // keys still held from the combo do nothing
+0:  bl    rd_frame                   // let go of the combo first: L and R turn
+    bl    rd_keys                    // pages in here (and would auto-repeat)
+    ldr   r1, =0x304
+    tst   r0, r1
+    bne   0b
+    str   r0, [r7, #W_PREVKEYS]
     movs  r0, #0
     str   r0, [r7, #W_REPEAT]
 rl_frame:
@@ -569,8 +606,8 @@ rl_frame:
     movs  r4, r0                     // r4 = held
     bics  r0, r1
     movs  r5, r0                     // r5 = act on these: newly pressed...
-    movs  r1, #0xF0
-    ands  r1, r4                     // ...plus the held d-pad after 20 frames, every 4th
+    ldr   r1, =0x3F0
+    ands  r1, r4                     // ...plus the held d-pad / L / R after 20 frames, every 4th
     ldr   r2, [r7, #W_REPEAT]
     adds  r2, #1
     cmp   r1, #0
@@ -582,23 +619,16 @@ rl_frame:
     lsls  r3, r2, #30
     bne   2f
     orrs  r5, r1
-2:  movs  r0, #2                     // B
+2:  movs  r0, #2                     // B closes (L and R turn pages now)
     tst   r5, r0
     bne   rl_close
-    ldr   r0, =0x304                 // L+R+Select, one of them new
-    movs  r1, r4
-    ands  r1, r0
-    cmp   r1, r0
-    bne   3f
-    tst   r5, r0
-    bne   rl_close
-3:  ldr   r6, [r7, #W_TOP]           // r6 = top before
+    ldr   r6, [r7, #W_TOP]           // r6 = top before
     ldr   r0, =W_LINES + ROWS * 4
     ldr   r0, [r7, r0]               // where the line after the screen starts
     ldr   r1, [r7, #W_FSIZE]
     cmp   r0, r1
     bhs   rl_up                      // the end is on screen: no further down
-    movs  r2, #0x10                  // Right: next page
+    ldr   r2, =0x110                 // Right or R: next page
     tst   r5, r2
     beq   4f
     str   r0, [r7, #W_TOP]
@@ -621,7 +651,7 @@ rl_up:
     beq   5f
     bl    rd_back
     b     rl_moved
-5:  movs  r2, #0x20                  // Left: previous page
+5:  ldr   r2, =0x220                 // Left or L: previous page
     tst   r5, r2
     beq   rl_frame
     movs  r4, #ROWS

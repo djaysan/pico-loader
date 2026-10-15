@@ -57,9 +57,9 @@ ifeq ($(GUIDE_IPC_FREEZE),1)
 DEFINES		+= -DGUIDE_IPC_FREEZE=1
 endif
 # GUIDE_READER=1 : phase 4 M3. M2's IPC_SYNC hook, but L+R+Select opens the
-#                  game's guide on the sub screen: Up/Down a line, Left/Right
-#                  a page, B (or the combo) closes, the display comes back as
-#                  it was. Ignored while a card read is in flight (press again).
+#                  game's guide on the sub screen: Up/Down a line, L/R or
+#                  Left/Right a page, B closes, the display comes back as it
+#                  was. Ignored while a card read is in flight (press again).
 #                  Not with GUIDE_ARENA_PROOF: the reader's work area sits in
 #                  the canary the M1 tone samples.
 ifeq ($(GUIDE_READER),1)

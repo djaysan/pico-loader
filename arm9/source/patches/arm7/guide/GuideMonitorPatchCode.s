@@ -21,6 +21,14 @@
 // Chains to the cheat engine when cheats are active, otherwise performs the
 // original epilogue itself. This code is position independent (copied to
 // reserved main memory), so labels are only referenced pc-relative.
+//
+// GUIDE_READER: no beep. While the arm9 reader is open this hook stops
+// running (the arm7 stalls on the frozen arm9), so a beep started on the press
+// could not be stopped on the release and played until the reader closed.
+
+#ifndef GUIDE_READER
+#define GUIDE_READER 0
+#endif
 
 .arm
 .global guidemonitor_entry_arm
@@ -101,11 +109,13 @@ arena_done:
     // release edge: stop the beep, restore REG_SOUNDCNT
     movs r0, #0
     str r0, [r4]
+#if !GUIDE_READER
     ldr r1, =0x040004D0 // sound channel 13
     str r0, [r1]
     ldr r2, [r4, #4]
     ldr r1, =0x04000500 // REG_SOUNDCNT
     strh r2, [r1]
+#endif
 #if GUIDE_IPC_FREEZE
     // put our IPC sync output back as it was, no irq: the game's own reset
     // handshake reads it
@@ -127,6 +137,7 @@ combo_held:
     // press edge: save REG_SOUNDCNT, force sound on, start the PSG beep
     movs r0, #1
     str r0, [r4]
+#if !GUIDE_READER
     ldr r1, =0x04000304 // REG_POWERCNT7
     ldrh r0, [r1]
     movs r2, #1 // sound power on (not restored, harmless)
@@ -142,6 +153,7 @@ combo_held:
     strh r0, [r1, #8] // SOUNDxTMR
     ldr r0, =0xE340407F // start | PSG | 50% duty | center pan | full volume
     str r0, [r1]
+#endif
 #if GUIDE_IPC_FREEZE
     // ask the arm9 to freeze (guide_ipcHandler): sync value 9 + irq request
     ldr r1, =0x04000180 // REG_IPCSYNC

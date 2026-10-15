@@ -17,6 +17,9 @@
 #include "patches/arm7/PokemonDownloaderArm7Patch.h"
 #include "patches/arm7/cheats/CheatEnginePatch.h"
 #include "patches/arm7/guide/GuideMonitorPatchCode.h"
+#if GUIDE_READER
+#include "patches/arm9/guide/GuideOverlay9.h"
+#endif
 #include "Arm7Patcher.h"
 
 static u32 correctAddress(u32 address, const nds_header_ntr_t* romHeader)
@@ -114,8 +117,18 @@ void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheats
         if (guideInfoLength > 0)
         {
             mainMemoryArenaLo = (mainMemoryArenaLo + 3) & ~3u; // cheats length may be unaligned
-            guideInfoPtr = (void*)correctAddress(mainMemoryArenaLo, romHeader);
-            mainMemoryArenaLo += (guideInfoLength + 3) & ~3u;
+#if GUIDE_READER
+            // The arm9 guide reader (set up by the arm9 pass, which ran before
+            // this one) reads this map, and the arm9 cannot reach the arm7's
+            // part of main memory: the map goes in the arm9 reservation then.
+            if (gGuideReaderClmt)
+                guideInfoPtr = (void*)correctAddress(gGuideReaderClmt, romHeader);
+            else
+#endif
+            {
+                guideInfoPtr = (void*)correctAddress(mainMemoryArenaLo, romHeader);
+                mainMemoryArenaLo += (guideInfoLength + 3) & ~3u;
+            }
             guideMonitorTarget = (void*)correctAddress(mainMemoryArenaLo, romHeader);
             mainMemoryArenaLo += (SECTION_SIZE(patch_guidemonitor) + 3) & ~3u;
             LOG_DEBUG("Guide info placed at 0x%p\n", guideInfoPtr);

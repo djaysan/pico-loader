@@ -7,10 +7,20 @@
 #ifndef GUIDE_IPC_FREEZE
 #define GUIDE_IPC_FREEZE 0
 #endif
+#ifndef GUIDE_READER
+#define GUIDE_READER 0
+#endif
+
+#if GUIDE_READER
+#include "patches/platform/LoaderPlatform.h"
+#endif
 
 // Published for the arm7 monitor pass (see GuideOverlay9.h).
 u32 gGuideReserveScanStart = 0;
 u32 gGuideReserveEnd = 0;
+#if GUIDE_READER
+u32 gGuideReaderClmt = 0;
+#endif
 
 // The detour overwrites the card function's first two instructions, so the
 // trampoline replays both from another address. Returns what to bake into
@@ -86,6 +96,12 @@ void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reser
     u32 sectionStart = (u32)SECTION_START(patch_guideoverlay9);
     u32 size = SECTION_SIZE(patch_guideoverlay9);
     u32 base = reserveBase;
+#if GUIDE_READER
+    // Its own heap and collection for the sd write code, so that it lands in
+    // the reader's work area rather than the nearly full arm9 patch heap.
+    PatchHeap writeCodeHeap;
+    PatchCodeCollection writeCode;
+#endif
 
     // Bake the literals/state into the loader's copy, then copy the whole blob.
     if (replay1)
@@ -100,6 +116,36 @@ void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reser
         guide_irqTable_lit = FindIrqTable(patchContext);
         LOG_DEBUG("Guide overlay: irq table 0x%08X\n", guide_irqTable_lit);
 #endif
+#if GUIDE_READER
+        // The reader's work area follows the blob. Without room for it (or
+        // without the hook) guide_work_lit stays 0 and the handler only chains.
+        u32 work = (base + size + 31) & ~31u;
+        if (guide_irqTable_lit && work + GUIDE_READER_WORK_SIZE <= reserveEnd)
+        {
+            guide_work_lit = work;
+            guide_info_lit = work + GUIDE_READER_CLMT_OFFSET;
+            // The same shared read code the card patch already placed.
+            auto sdRead = patchContext.GetLoaderPlatform()->CreateSdReadPatchCode(
+                patchContext.GetPatchCodeCollection(), patchContext.GetPatchHeap());
+            guide_sdRead_lit = (u32)sdRead->GetReadSectorsFunction();
+            // Twl-sdk games keep the system shared area at 0x02FFF000. Read the
+            // card lock through the address the game itself writes: another
+            // alias of the same word could sit stale in the data cache.
+            static const u32 sTwlCardLock = 0x02FFFFE0u;
+            guide_cardLock_lit = patchContext.FindPattern32(&sTwlCardLock, sizeof(sTwlCardLock))
+                ? 0x02FFFFE0u : 0x027FFFE0u;
+            // Sd write, for saving the reading position. Copied in below, after
+            // the work area is cleared; refused when the code would not fit.
+            u32 writeCodeStart = work + GUIDE_READER_WRCODE_OFFSET;
+            writeCodeHeap.AddFreeSpace((void*)writeCodeStart, GUIDE_READER_WRCODE_SIZE);
+            auto sdWrite = patchContext.GetLoaderPlatform()->CreateSdWritePatchCode(writeCode, writeCodeHeap);
+            u32 writeFunction = sdWrite ? (u32)sdWrite->GetWriteSectorFunction() : 0;
+            if (writeFunction >= writeCodeStart && writeFunction < writeCodeStart + GUIDE_READER_WRCODE_SIZE)
+                guide_sdWrite_lit = writeFunction;
+        }
+        LOG_DEBUG("Guide reader: work 0x%08X, sd read 0x%08X, sd write 0x%08X, card lock 0x%08X\n",
+            guide_work_lit, guide_sdRead_lit, guide_sdWrite_lit, guide_cardLock_lit);
+#endif
     }
     guide_rebootEntry_lit = rebootEntry;             // thumb bit already set, or 0
 
@@ -110,6 +156,17 @@ void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reser
     memcpy((void*)base, (const void*)sectionStart, size);
     gGuideReserveScanStart = (base + size + 3) & ~3u;
     gGuideReserveEnd = reserveEnd;
+#if GUIDE_READER
+    if (guide_work_lit)
+    {
+        // Zero state: top of the guide, empty sector window, no cluster map
+        // until the arm7 loader copies one in (fileSize 0 = reader stays off).
+        memset((void*)guide_work_lit, 0, GUIDE_READER_WORK_SIZE);
+        gGuideReaderClmt = guide_info_lit;
+        if (guide_sdWrite_lit)
+            writeCode.CopyAllToTarget();
+    }
+#endif
 
     if (replay1)
     {

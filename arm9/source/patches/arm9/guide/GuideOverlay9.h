@@ -40,3 +40,26 @@ void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reser
 ///        sequence). Both 0 when nothing was placed.
 extern "C" u32 gGuideReserveScanStart;
 extern "C" u32 gGuideReserveEnd;
+
+/// @brief GUIDE_READER: bytes of the reader's work area, placed right after
+///        the blob in the reservation (W_SIZE in GuideOverlay9PatchCode.s -
+///        keep in sync). Stack, sector window, the backup of the sub bg
+///        tiles and map the reader draws over, the guide cluster map and a copy
+///        of the platform's sd write code.
+#define GUIDE_READER_WORK_SIZE  0x2000
+
+/// @brief GUIDE_READER: offset of the guide cluster map in the work area
+///        (W_CLMT in GuideOverlay9PatchCode.s - keep in sync).
+#define GUIDE_READER_CLMT_OFFSET 0x1E00
+
+/// @brief GUIDE_READER: where in the work area the platform's sd write code is
+///        copied (for saving the reading position), and the room it has.
+#define GUIDE_READER_WRCODE_OFFSET 0x1F00
+#define GUIDE_READER_WRCODE_SIZE   0x100
+
+/// @brief GUIDE_READER: where the arm7 patch pass (which runs after the arm9
+///        pass) must place the guide cluster map, or 0 when the reader is off.
+///        The reader runs on the arm9, and the game's arm9 MPU has no access to
+///        the arm7's part of main memory (region 2, 0x023E0000-0x02400000)
+///        where the map would otherwise go; the arm7 can write anywhere.
+extern "C" u32 gGuideReaderClmt;

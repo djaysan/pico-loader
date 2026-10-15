@@ -562,6 +562,90 @@ void NdsLoader::HandleHomebrewPatching()
     }
 }
 
+#if GUIDE_READER
+// Reads the decimal number at p (after any spaces) and moves p past it.
+static u32 ParseDecimal(const char*& p)
+{
+    while (*p == ' ' || *p == '\t')
+        p++;
+    u32 value = 0;
+    while (*p >= '0' && *p <= '9')
+        value = value * 10 + (u32)(*p++ - '0');
+    return value;
+}
+
+// Writes value in decimal at p and returns the end.
+static char* WriteDecimal(char* p, u32 value)
+{
+    char digits[10];
+    int count = 0;
+    do
+    {
+        digits[count++] = (char)('0' + value % 10);
+        value /= 10;
+    } while (value != 0);
+    while (count > 0)
+        *p++ = digits[--count];
+    return p;
+}
+
+// The reading position of the arm9 guide reader, in <guide>.pos as the
+// guide-reader app keeps it ("<offset> <line>\n"; the app reads it with
+// fscanf, so trailing spaces are fine). Rewritten here as exactly
+// GUIDE_POS_SIZE bytes so that the reader can later rewrite the file's first
+// sector in place, without the file system. On any failure posSector stays 0
+// and the reader just does not remember the position across boots.
+static void PrepareGuidePosition(const char* guidePath, guide_file_info_t& info)
+{
+    char posPath[256 + sizeof(".pos")];
+    strcpy(posPath, guidePath);
+    strcat(posPath, ".pos");
+    auto posFile = std::make_unique<FIL>();
+    if (f_open(posFile.get(), posPath, FA_OPEN_ALWAYS | FA_READ | FA_WRITE) != FR_OK)
+    {
+        return;
+    }
+
+    char text[GUIDE_POS_SIZE + 1];
+    UINT count = 0;
+    if (f_read(posFile.get(), text, GUIDE_POS_SIZE, &count) != FR_OK)
+    {
+        count = 0;
+    }
+    text[count] = 0;
+    const char* p = text;
+    u32 offset = ParseDecimal(p);
+    u32 line = ParseDecimal(p);
+    if (offset >= info.fileSize)
+    {
+        offset = 0; // a different guide file now, or garbage
+        line = 1;
+    }
+    if (line == 0)
+    {
+        line = 1;
+    }
+
+    memset(text, ' ', GUIDE_POS_SIZE);
+    char* end = WriteDecimal(text, offset);
+    *end++ = ' ';
+    WriteDecimal(end, line);
+    text[GUIDE_POS_SIZE - 1] = '\n';
+    if (f_lseek(posFile.get(), 0) == FR_OK
+        && f_write(posFile.get(), text, GUIDE_POS_SIZE, &count) == FR_OK && count == GUIDE_POS_SIZE
+        && f_truncate(posFile.get()) == FR_OK
+        && f_sync(posFile.get()) == FR_OK
+        && posFile->obj.sclust >= 2)
+    {
+        info.posSector = posFile->obj.fs->database + (posFile->obj.sclust - 2) * posFile->obj.fs->csize;
+        info.posOffset = offset;
+        info.posLine = line;
+        LOG_DEBUG("Guide position %d (line %d), sector %d\n", offset, line, info.posSector);
+    }
+    f_close(posFile.get());
+}
+#endif
+
 void NdsLoader::PrepareGuideFile()
 {
     _hasGuide = false;
@@ -608,6 +692,9 @@ void NdsLoader::PrepareGuideFile()
     _guideFileInfo.clusterMask = guideFile->obj.fs->csize - 1;
     _guideFileInfo.fileSize = f_size(guideFile.get());
     f_close(guideFile.get());
+#if GUIDE_READER
+    PrepareGuidePosition(guidePath, _guideFileInfo);
+#endif
     _hasGuide = true;
     LOG_DEBUG("Guide %s: %d bytes\n", guidePath, _guideFileInfo.fileSize);
 }

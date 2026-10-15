@@ -22,6 +22,15 @@ BINDIRS		:=
 
 DEFINES		:= -DLIBTWL_ARM7 -DARM7
 
+# GUIDE_READER=1 (see Makefile.arm9): the loader also prepares <guide>.pos, the
+#                 reading position the arm9 reader restores and saves.
+ifeq ($(GUIDE_READER),1)
+DEFINES		+= -DGUIDE_READER=1
+endif
+ifeq ($(GUIDE_READER_DIAG),1)
+DEFINES		+= -DGUIDE_READER=1
+endif
+
 # Libraries
 # ---------
 

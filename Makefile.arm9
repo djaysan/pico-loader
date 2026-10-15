@@ -56,6 +56,20 @@ endif
 ifeq ($(GUIDE_IPC_FREEZE),1)
 DEFINES		+= -DGUIDE_IPC_FREEZE=1
 endif
+# GUIDE_READER=1 : phase 4 M3. M2's IPC_SYNC hook, but L+R+Select opens the
+#                  game's guide on the sub screen: Up/Down a line, Left/Right
+#                  a page, B (or the combo) closes, the display comes back as
+#                  it was. Ignored while a card read is in flight (press again).
+#                  Not with GUIDE_ARENA_PROOF: the reader's work area sits in
+#                  the canary the M1 tone samples.
+ifeq ($(GUIDE_READER),1)
+DEFINES		+= -DGUIDE_IPC_FREEZE=1 -DGUIDE_READER=1
+endif
+# GUIDE_READER_DIAG=1 : GUIDE_READER plus stage colors on the bottom screen for
+#                       a hardware lap that hangs (see GuideOverlay9PatchCode.s).
+ifeq ($(GUIDE_READER_DIAG),1)
+DEFINES		+= -DGUIDE_IPC_FREEZE=1 -DGUIDE_READER=1 -DGUIDE_READER_DIAG=1
+endif
 
 # Libraries
 # ---------

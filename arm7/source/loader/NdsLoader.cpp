@@ -348,7 +348,7 @@ void NdsLoader::Load(BootMode bootMode)
     {
         if (_runInDSiMode)
         {
-            if (!(_romHeader.twlFlags2 & 1))
+            if (!(_romHeader.twlFlags2 & NDS_HEADER_TWL_FLAGS_2_USE_TWL_CODEC))
             {
                 DSMode().SwitchToDSTouchAndSoundMode(_romHeader.gameCode);
             }
@@ -432,7 +432,7 @@ void NdsLoader::InsertArgv()
 
     // Find the address to write argv
     u32 argDst = ((_romHeader.arm9LoadAddress + _romHeader.arm9Size + 3) & ~3) + 4;
-    if (_romHeader.SupportsDsiMode())
+    if (_runInDSiMode)
     {
         u32 argDstTwl = ((_romHeader.arm9iLoadAddress + _romHeader.arm9iSize + 3) & ~3) + 4;
         if (argDstTwl > argDst)
@@ -709,6 +709,14 @@ void NdsLoader::ApplyArm7Patches()
     void* patchSpaceStart = (void*)receiveFromArm9();
     void* cheatsPtr = (void*)receiveFromArm9();
     void* guideInfoPtr = (void*)receiveFromArm9();
+    char* bannerSavePathPtr = (char*)receiveFromArm9();
+    // Test 109: capture the working driver before game boot destroys loader RAM.
+    void* hotkeyDldiPtr = (void*)receiveFromArm9();
+    if (hotkeyDldiPtr != nullptr)
+    {
+        dldi_copyTo(hotkeyDldiPtr);
+    }
+
     if (cheatsPtr != nullptr && _cheats != nullptr)
     {
         memcpy(cheatsPtr, _cheats, _cheats->length);
@@ -716,6 +724,10 @@ void NdsLoader::ApplyArm7Patches()
     if (guideInfoPtr != nullptr && _hasGuide)
     {
         memcpy(guideInfoPtr, &_guideFileInfo, sizeof(guide_file_info_t));
+    }
+    if (bannerSavePathPtr != nullptr)
+    {
+        memcpy(bannerSavePathPtr, _dsiwareSaveResult.bannerSaveFilePath, 64);
     }
     if (patchSpaceStart)
     {

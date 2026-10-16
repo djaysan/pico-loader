@@ -10,6 +10,7 @@
 #include "patches/PatchContext.h"
 #include "patches/platform/LoaderPlatform.h"
 #include "patches/arm7/sdk2to4/CardiTaskThreadPatch.h"
+#include "patches/arm7/sdk5/BannerSavePatch.h"
 #include "patches/arm7/sdk5/CardiDoTaskFromArm9Patch.h"
 #include "patches/arm7/OsGetInitArenaLoPatch.h"
 #include "patches/arm7/DisableArm7WramClearPatch.h"
@@ -20,7 +21,12 @@
 #if GUIDE_READER
 #include "patches/arm9/guide/GuideOverlay9.h"
 #endif
+#include "patches/arm7/hotkey/RetailHotkeyDetectionPatch.h"
+#include "patches/arm7/hotkey/RetailHotkeyDetectionPatchCode.h"
 #include "Arm7Patcher.h"
+extern u32 retailReturnCardiMode;
+extern u32 retailReturnSplitPathWords;
+extern "C" u32 patch_retailhotkeydetect_pathWords;
 
 static u32 correctAddress(u32 address, const nds_header_ntr_t* romHeader)
 {
@@ -35,10 +41,12 @@ static u32 correctAddress(u32 address, const nds_header_ntr_t* romHeader)
 }
 
 void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheatsLength, void*& cheatsPtr,
-    u32 guideInfoLength, void*& guideInfoPtr, bool runInDSiMode) const
+    u32 guideInfoLength, void*& guideInfoPtr, char*& bannerSavePathPtr, bool runInDSiMode) const
 {
     cheatsPtr = nullptr;
     guideInfoPtr = nullptr;
+    patch_retailhotkeydetect_dldiAddress = 0;
+    patch_retailhotkeydetect_pathWords = retailReturnSplitPathWords;
     auto romHeader = (const nds_header_ntr_t*)TWL_SHARED_MEMORY->ntrSharedMem.romHeader;
     auto twlRomHeader = (const nds_header_twl_t*)TWL_SHARED_MEMORY->twlRomHeader;
     ModuleParamsLocator moduleParamsLocator;
@@ -89,6 +97,13 @@ void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheats
         const u32 arm7PatchSpaceSize = 0x800;
         void* privateWramHeapStart = arm7ArenaPatch->GetArm7PrivateWramArenaLo();
         u32 mainMemoryArenaLo = (u32)arm7ArenaPatch->GetMainMemoryArenaLo();
+        // Test 109: reserve persistent game-excluded storage for the real driver.
+        if (cheatsLength == 0 && (retailReturnCardiMode == 1 || retailReturnCardiMode == 3))
+        {
+            patch_retailhotkeydetect_dldiAddress = correctAddress(mainMemoryArenaLo, romHeader);
+            mainMemoryArenaLo += 16 * 1024;
+        }
+
         if (0x0380F780 - (u32)privateWramHeapStart - 0x2100 >= arm7PatchSpaceSize)
         {
             patchSpaceStart = privateWramHeapStart;
@@ -103,12 +118,20 @@ void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheats
 
         patchContext.GetPatchHeap().AddFreeSpace(patchSpaceStart, arm7PatchSpaceSize);
 
+        // The return hotkey detector and the guide monitor hook the same
+        // OSi_IrqVBlank instruction. With a guide the monitor takes the hook
+        // and chains to the detector (CheatEnginePatch), so both run.
+        const bool retailHotkey = cheatsLength == 0 && (retailReturnCardiMode == 1 || retailReturnCardiMode == 3);
         if (cheatsLength > 0)
         {
             void* cheats = (void*)correctAddress(mainMemoryArenaLo, romHeader);
             LOG_DEBUG("Cheats placed at 0x%p\n", cheats);
             cheatsPtr = cheats;
             mainMemoryArenaLo += cheatsLength;
+        }
+        else if (retailHotkey && guideInfoLength == 0)
+        {
+            patchCollection.AddPatch(new RetailHotkeyDetectionPatch());
         }
 
         // The guide file info and the guide monitor code are placed in
@@ -136,7 +159,7 @@ void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheats
 
         if (cheatsLength > 0 || guideInfoLength > 0)
         {
-            patchCollection.AddPatch(new CheatEnginePatch(cheatsPtr, guideMonitorTarget, guideInfoPtr));
+            patchCollection.AddPatch(new CheatEnginePatch(cheatsPtr, guideMonitorTarget, guideInfoPtr, retailHotkey));
         }
 
         if (romHeader->unitCode == 0) // seems only present on NITRO, not on HYBRID or LIMITED
@@ -151,7 +174,18 @@ void* Arm7Patcher::ApplyPatches(const LoaderPlatform* loaderPlatform, u32 cheats
                 patchCollection.AddPatch(new Sdk5DsiSdCardRedirectPatch());
             }
 
-            if (!twlRomHeader->IsDsiWare())
+            if (twlRomHeader->IsDsiWare())
+            {
+                if (twlRomHeader->twlFlags2 & NDS_HEADER_TWL_FLAGS_2_HAS_BANNER_SAVE)
+                {
+                    char* bannerSavePath = (char*)correctAddress(mainMemoryArenaLo, romHeader);
+                    LOG_DEBUG("Banner save path placed at 0x%p\n", bannerSavePath);
+                    bannerSavePathPtr = bannerSavePath;
+                    patchCollection.AddPatch(new BannerSavePatch(bannerSavePath));
+                    mainMemoryArenaLo += 64;
+                }
+            }
+            else
             {
                 void* saveTmpBuffer = (void*)correctAddress(mainMemoryArenaLo, romHeader);
                 mainMemoryArenaLo += 512;

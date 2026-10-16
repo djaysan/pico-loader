@@ -97,8 +97,9 @@ arena_done:
     adr r4, monitor_state
     ldr r0, =0x04000130 // REG_KEYINPUT
     ldrh r0, [r0]
-    ldr r1, =0x304 // L | R | Select (active low)
+    ldr r1, =0x384 // L | R | Select | Down (active low)
     ands r0, r1
+    cmp r0, #0x80 // L+R+Select with Down up; L+R+Down+Select is the return hotkey
     beq combo_held
 
     // == combo not held ==

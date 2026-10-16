@@ -3,6 +3,7 @@
 #include "thumbInstructions.h"
 #include "CheatEnginePatchCode.h"
 #include "patches/arm7/guide/GuideMonitorPatchCode.h"
+#include "patches/arm7/hotkey/RetailHotkeyDetectionPatchCode.h"
 #include "patches/arm9/guide/GuideOverlay9.h"
 #include "CheatEnginePatch.h"
 
@@ -62,6 +63,16 @@ void CheatEnginePatch::ApplyPatch(PatchContext& patchContext)
         );
         hookTarget = cheatEnginePatchCode->GetCheatEngineFunction();
         hookTargetArm = cheatEnginePatchCode->GetCheatEngineFunctionArm();
+    }
+    else if (_chainRetailHotkey && _guideMonitorTarget)
+    {
+        // Same entry contract as the cheat engine: the guide monitor chains to it.
+        auto hotkeyPatchCode = patchContext.GetPatchCodeCollection().AddUniquePatchCode<RetailHotkeyDetectionPatchCode>
+        (
+            patchContext.GetPatchHeap()
+        );
+        hookTarget = hotkeyPatchCode->GetEntryFunction();
+        hookTargetArm = hotkeyPatchCode->GetEntryFunctionArm();
     }
 
     if (_guideMonitorTarget)

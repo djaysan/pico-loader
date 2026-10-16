@@ -285,10 +285,12 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
         // the same shape of function and reached just as often.
         u32* cardEntry = nullptr;
         bool cardThumb = false;
+        u32* loaderEntryLiteral = nullptr;
         if (cardiReadCardPatch)
         {
             cardEntry = cardiReadCardPatch->GetCardiReadCard();
             cardThumb = cardiReadCardPatch->IsThumb();
+            loaderEntryLiteral = cardiReadCardPatch->GetLoaderEntryLiteral();
         }
         else if (cardiReadRomWithCpuPatch)
         {
@@ -296,7 +298,7 @@ Arm9Patcher::PatchResult Arm9Patcher::ApplyPatches(const LoaderPlatform* loaderP
             cardThumb = cardiReadRomWithCpuPatch->IsThumb();
         }
         GuideOverlay9Install(patchContext, guideReserveBase, guideReserveEnd, cardEntry, cardThumb,
-            osResetSystemPatch ? osResetSystemPatch->GetRebootEntry() : 0);
+            loaderEntryLiteral, osResetSystemPatch ? osResetSystemPatch->GetRebootEntry() : 0);
     }
 #else
     (void)cardiReadCardPatch;

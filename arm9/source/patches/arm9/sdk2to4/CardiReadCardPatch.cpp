@@ -213,6 +213,7 @@ void CardiReadCardPatch::ApplyPatch(PatchContext& patchContext)
         *(u16*)((u8*)_cardiReadCard + patchOffset + 2) = THUMB_LDR_PC_IMM(THUMB_R0, 0); // ldr r0,= entryAddress
         *(u16*)((u8*)_cardiReadCard + patchOffset + 4) = THUMB_BLX(THUMB_R0);
         *(u32*)((u8*)_cardiReadCard + patchOffset + 6) = entryAddress;
+        _loaderEntryLiteral = (u32*)((u8*)_cardiReadCard + patchOffset + 6);
     }
     else
     {

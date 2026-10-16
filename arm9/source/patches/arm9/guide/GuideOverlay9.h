@@ -25,6 +25,9 @@
 /// @param reserveEnd    End of the reserved main memory (the original arena high).
 /// @param cardiReadCard The card read function entry the loader found, or nullptr.
 /// @param cardThumb     True if that function is thumb (not detoured).
+/// @param loaderEntryLiteral Thumb card functions: the literal of the loader's
+///                      own `blx` into its card patch, or nullptr. Repointed at
+///                      guide_tramp_call when there is no detour.
 /// @param rebootEntry   Address of the patched OS_ResetSystem tail, or 0. With
 ///                      EXIT_TO_LAUNCHER the resident blob jumps here while
 ///                      L+R+Start+Select is held.
@@ -32,7 +35,7 @@
 /// A card entry that cannot be detoured still gets the blob placed, so the
 /// residency check covers it. Nothing here is ever fatal.
 void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reserveEnd,
-    u32* cardiReadCard, bool cardThumb, u32 rebootEntry);
+    u32* cardiReadCard, bool cardThumb, u32* loaderEntryLiteral, u32 rebootEntry);
 
 /// @brief The canary part of the reservation, [start, end), published by
 ///        GuideOverlay9Install for the arm7 residency check, which the later

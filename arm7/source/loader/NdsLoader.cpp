@@ -107,13 +107,18 @@ void NdsLoader::Load(BootMode bootMode)
         }
     }
 
-    if (!PicoLoaderArranger().SetupPicoLoaderInfo((loader_info_t*)TWL_SHARED_MEMORY->ntrSharedMem.cardRomHeader))
+    u32 loader7Size = 0;
+    u32 loader7Sum = 0;
+    if (!PicoLoaderArranger().SetupPicoLoaderInfo((loader_info_t*)TWL_SHARED_MEMORY->ntrSharedMem.cardRomHeader,
+        loader7Size, loader7Sum))
     {
         ErrorDisplay().PrintError("Failed to setup Pico Loader info.");
         return;
     }
 
     sendToArm9(IPC_COMMAND_ARM9_INITIALIZE_LOADER_INFO);
+    sendToArm9(loader7Size);
+    sendToArm9(loader7Sum);
     receiveFromArm9();
 
     switch (bootMode)

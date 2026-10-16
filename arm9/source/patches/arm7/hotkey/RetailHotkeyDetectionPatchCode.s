@@ -440,10 +440,14 @@ read_one_failed:
 .global patch_retailhotkeydetect_loaderExtents
 patch_retailhotkeydetect_loaderExtents:
     .space 64               // seven count/start pairs plus zero terminator
+.global patch_retailhotkeydetect_loaderWordCount
+patch_retailhotkeydetect_loaderWordCount:
 loaderWordCount:
-    .word 12120             // 48480 exact file bytes
+    .word 0                 // C bakes: picoLoader7.bin size / 4, measured at launch
+.global patch_retailhotkeydetect_loaderSum
+patch_retailhotkeydetect_loaderSum:
 expectedLoaderSum:
-    .word 0x0E2D6140         // sum of all little-endian file words mod 2^32
+    .word 0                 // C bakes: sum of all little-endian file words mod 2^32
 cardRegBase:
     .word 0x04000198
 cardDataReg:

@@ -189,6 +189,10 @@ static void handleSetRomFileInfoCommand()
 
 static void handleInitializeLoaderInfoCommand()
 {
+    // picoLoader7.bin as measured by the arm7 at launch (0 = unreadable).
+    const u32 loader7Size = receiveFromArm7();
+    patch_retailhotkeydetect_loaderSum = receiveFromArm7();
+    patch_retailhotkeydetect_loaderWordCount = loader7Size / 4;
     dc_invalidateRange(TWL_SHARED_MEMORY->ntrSharedMem.cardRomHeader, sizeof(loader_info_t));
     memcpy(&sLoaderInfo, TWL_SHARED_MEMORY->ntrSharedMem.cardRomHeader, sizeof(loader_info_t));
 
@@ -206,10 +210,11 @@ static void handleInitializeLoaderInfoCommand()
     else
         LOG_DEBUG("Retail hotkey disabled: launcher path exceeds compact capacity or is empty\n");
 
-    // Test 93: bake bounded physical extents for the complete 48480-byte
-    // ARM7 loader into the injected patch. No runtime ARM9 mailbox is needed.
+    // Test 93: bake bounded physical extents for the complete ARM7 loader
+    // into the injected patch. No runtime ARM9 mailbox is needed. A size that
+    // is not whole words cannot be summed exactly: no extents, hotkey off.
     memset(patch_retailhotkeydetect_loaderExtents, 0, 64);
-    u32 remainingSectors = 95; // ceil(48480 / 512)
+    u32 remainingSectors = (loader7Size != 0 && (loader7Size & 3) == 0) ? (loader7Size + 511) / 512 : 0;
     u32 output = 0;
     if (sLoaderInfo.clusterShift < 32)
     {

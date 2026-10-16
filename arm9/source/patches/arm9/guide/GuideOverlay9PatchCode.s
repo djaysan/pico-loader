@@ -137,6 +137,27 @@ guide_replay_lit:
 guide_rebootEntry_lit:
     .word 0                          // C bakes: patched OS_ResetSystem tail, or 0
 
+#if GUIDE_IPC_FREEZE
+// ======================= loader-call trampoline =======================
+// For card functions the detour cannot take (thumb, e.g. Zelda: Phantom
+// Hourglass). Inside the game's card function the loader's own card patch
+// does `ldr r0,=entry ; blx r0`; that literal points here instead. Run the
+// installer, then continue exactly as that call would have: r0 = the
+// loader's entry (mode in bit 0), lr = the game, everything else untouched.
+.global guide_tramp_call
+.type guide_tramp_call, %function
+guide_tramp_call:
+    stmfd sp!, {r0-r3, r12, lr}
+    bl    guide_ipcInstall
+    ldmfd sp!, {r0-r3, r12, lr}
+    ldr   r0, guide_loaderEntry_lit
+    bx    r0
+
+.global guide_loaderEntry_lit
+guide_loaderEntry_lit:
+    .word 0                          // C bakes: the loader's card patch entry it replaced
+#endif
+
 #if EXIT_TO_LAUNCHER
 // ======================= exit to launcher =======================
 // Returns normally unless the combo is held, in which case it never returns.

@@ -78,7 +78,7 @@ static u32 FindIrqTable(PatchContext& patchContext)
 #endif
 
 void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reserveEnd,
-    u32* cardiReadCard, bool cardThumb, u32 rebootEntry)
+    u32* cardiReadCard, bool cardThumb, u32* loaderEntryLiteral, u32 rebootEntry)
 {
     if (!reserveBase)
     {
@@ -87,11 +87,20 @@ void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reser
     }
 
     // Only a stmfd prologue (top halfword 0xE92D) is safe to displace; every
-    // arm card variant the loader matches begins with one. Thumb entries need
-    // a thumb detour, which does not exist yet.
+    // arm card variant the loader matches begins with one. Thumb entries are
+    // not detoured: the loader's own call into its card patch is repointed at
+    // guide_tramp_call instead (loaderEntryLiteral).
     u32 replay1 = 0;
     if (cardiReadCard && !cardThumb && (cardiReadCard[0] & 0xFFFF0000u) == 0xE92D0000u)
         replay1 = RelocateCardInstruction1(cardiReadCard);
+#if GUIDE_IPC_FREEZE
+    if (!replay1 && loaderEntryLiteral)
+        guide_loaderEntry_lit = *loaderEntryLiteral;
+    const bool hooked = replay1 || guide_loaderEntry_lit;
+#else
+    (void)loaderEntryLiteral;
+    const bool hooked = replay1;
+#endif
 
     u32 sectionStart = (u32)SECTION_START(patch_guideoverlay9);
     u32 size = SECTION_SIZE(patch_guideoverlay9);
@@ -111,8 +120,11 @@ void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reser
         // Resume where the card function really runs: an autoload block is
         // copied to its target before main(), so the image address is wrong there.
         guide_cardReturn_lit = patchContext.GetAutoloadAdjuster()->AdjustInitialToFinal((u32)cardiReadCard) + 8;
+    }
+    if (hooked)
+    {
 #if GUIDE_IPC_FREEZE
-        // The irq hook is installed from the detour, so only look when there is one.
+        // The irq hook is installed from the card hook, so only look when there is one.
         guide_irqTable_lit = FindIrqTable(patchContext);
         LOG_DEBUG("Guide overlay: irq table 0x%08X\n", guide_irqTable_lit);
 #endif
@@ -175,11 +187,19 @@ void GuideOverlay9Install(PatchContext& patchContext, u32 reserveBase, u32 reser
         cardiReadCard[0] = 0xE51FF004u; // ldr pc, [pc, #-4]
         cardiReadCard[1] = base + ((u32)&guide_tramp - sectionStart);
     }
+#if GUIDE_IPC_FREEZE
+    else if (guide_loaderEntry_lit)
+    {
+        // Arm entry (bit 0 clear): the game's `blx r0` switches to arm for it.
+        *loaderEntryLiteral = base + ((u32)&guide_tramp_call - sectionStart);
+    }
+#endif
 
     dc_flushAll();
     dc_drainWriteBuffer();
     ic_invalidateAll();
 
     LOG_DEBUG("Guide overlay: blob 0x%08X-0x%08X, card 0x%p %s, reboot 0x%08X\n",
-        base, reserveEnd, cardiReadCard, replay1 ? "detoured" : "not detoured", rebootEntry);
+        base, reserveEnd, cardiReadCard, replay1 ? "detoured" : hooked ? "loader call hooked" : "not hooked",
+        rebootEntry);
 }

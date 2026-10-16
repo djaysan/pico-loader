@@ -61,7 +61,9 @@ def predict(images):
     for img in images:
         name, _ = find_first(img, thumb)
         if name:
-            return True, False, f'thumb card entry ({name})'
+            # sdk 2-4: the loader's own blx into its card patch is repointed
+            # at guide_tramp_call. Twl thumb (CARDi_ReadRomWithCPU): no hook yet.
+            return True, not twl, f'thumb card entry ({name})'
     return True, False, 'card entry not found'
 
 def self_test():
@@ -78,10 +80,13 @@ def self_test():
     assert predict(pad + lo_pool + pad + sdk2_card + pad)[:2] == (False, False)
     # a misaligned copy is not what the loader's word search finds
     assert predict(pad + b'\x00\x00' + hi + pad)[:2] == (False, False)
-    # thumb card entry: reserved (residency tone) but not detoured
+    # twl thumb card entry: reserved but not hooked
     twl = pad + struct.pack('<I', 0x05047531) + MODPARAMS
     ok, det, note = predict(twl + hi + pad + ROM_THUMB[0][1] + pad)
     assert ok and not det and 'thumb' in note, note
+    # sdk 2-4 thumb card entry: hooked through the loader's own call
+    ok, det, note = predict(pad + hi + pad + CARD_THUMB[0][1] + pad)
+    assert ok and det and 'thumb' in note, note
     # an unreplayable second instruction (a branch) is refused
     bad = w(0xE92D4070, 0xEB000010, 0xE1A06000, 0xE3A00C02)
     assert predict(pad + hi + pad + bad + pad)[:2] == (True, False)
@@ -100,5 +105,5 @@ if __name__ == '__main__':
             print(f'  ----  ????  no arm9  {name}'); continue
         reserved, detoured, note = predict(imgs)
         tone = ('HIGH' if reserved else 'none')
-        what = 'detour + residency' if detoured else ('residency only' if reserved else 'silent')
+        what = 'hooked + residency' if detoured else ('residency only' if reserved else 'silent')
         print(f'  {tone}  {meta[1]:4}  {what:18}  {note:42.42} {name}')

@@ -1,3 +1,37 @@
+# In-game guides for DSpico
+
+Read a game's walkthrough on your DS while you play. Hold **L+R+Select** in a
+game: it pauses and the guide appears on one screen. Press **B** and the game
+carries on exactly where it was. Your page is remembered, even after you switch
+the DS off.
+
+**[⬇ Download DSpico-InGame-Guides.zip](https://github.com/djaysan/pico-loader/releases/latest/download/DSpico-InGame-Guides.zip)**
+
+1. Back up your microSD card.
+2. Copy the `_pico` folder from the zip to the root of the card, replacing
+   `picoLoader7.bin` and `picoLoader9.bin`.
+3. Fill the card with guides at **[guides.retromodlab.com/app](https://guides.retromodlab.com/app)**
+   (Chrome or Edge), or add your own plain text as `/guides/<game file name>.txt`,
+   e.g. `Games/Okamiden.nds` → `/guides/Okamiden.txt`.
+
+| In a game | |
+| --- | --- |
+| L+R+Select | open the guide |
+| L / R | previous / next page |
+| Up / Down | one line |
+| B | close, the game continues |
+
+DSpico only. Tested on an original DS Lite with New Super Mario Bros., Mario Kart
+DS, Zelda: Phantom Hourglass, Dragon Quest IX, Metroid Prime Hunters, Okamiden and
+Golden Sun: Dark Dawn. A few older games (Advance Wars: Dual Strike, Castlevania:
+Dawn of Sorrow) have no room for the guide and simply play as normal.
+
+This is a modified Pico Loader, not an official LNH-team release. To undo, put back
+the two files from the [official release](https://github.com/LNH-team/pico-loader/releases).
+The code is on the `guide-overlay` branch.
+
+---
+
 # Pico Loader
 Pico Loader is a homebrew and retail DS(i) rom loader supporting a variety of platforms (see below).
 
